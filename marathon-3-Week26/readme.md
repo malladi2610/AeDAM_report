@@ -1,4 +1,4 @@
-It is a 24 hrs hackathon starting from Sunday till Monday
+It is a 24 hrs hackathon starting from Sunday till Monday - 16th to 17th March
 
 # Goals to achieve are as follows:
 1. Zigzag cost model replication on the excel sheet/Python script with Technology dependent and independent stats Understanding the cost model to manipulate it with the parameters to get desired results -> Stopped this for now as it is not leading anywhere and it is getting complicated. Any way this is used for validation and once we have the results we can performa validation
