@@ -525,5 +525,5 @@ The multi-core exploration is still ongoing and addressing the problem currently
   
 ## Plan for Next Week - 27
   
-<img src="../attachments/plan_week_27_1.png" alt="Plan for Week 27" width="500">
+<img src="../attachments/plan_week_27_1.png" alt="Plan for Week 27" width="800">
   
