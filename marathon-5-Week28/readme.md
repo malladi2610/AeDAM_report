@@ -22,5 +22,6 @@
 In this marathon I present the limitation of the zigzag tool not being able to give the correct extimation of the event driven nature, but in our specific case as the workload scales that particular issue of the over estimation solves on it's own means, it becomes negligible in terms of error which is acceptable in our situation
 
 
+
 # Next week goals
 
