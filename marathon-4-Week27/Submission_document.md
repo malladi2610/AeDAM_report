@@ -82,7 +82,7 @@ The statistics are as follows:
   
 |                | Description                           |
 |----------------|---------------------------------------|
-| **Word Access**| Inputs: 9, Weights: 225, Outputs: 225 |
+| **Word Access**| Inputs: 25, Weights: 225, Outputs: 225 |
 | **Partial Sum**| 8 * 225 = 1800 (across 8 NPEs)        |
 | **Latency**    | Off: 0, Comp: 225, On: 0              |
   
@@ -96,7 +96,7 @@ Upon validating the above mapping, the actual statistics are as follows:
   
 |                | Description                           |
 |----------------|---------------------------------------|
-| **Word Access**| Inputs: 9, Weights: 225, Outputs: 81  |
+| **Word Access**| Inputs: 25, Weights: 81, Outputs: 81  |
 | **Partial Sum**| 8 * 81 = 648 (across 8 NPEs)          |
 | **Latency**    | Off: 0, Comp: 81, On: 0               |
   

@@ -715,3 +715,224 @@ The **Event-Driven Calculation** function corrects Zigzag’s overcounting by:
    - **Partial Sums**: 648
 
 This provides a realistic model for input stationary mappings, allowing you to reason about and quantify Zigzag’s excess word accesses (e.g., 225 vs. 81 for outputs). You can use this function to optimize hardware designs by focusing on necessary computations only! Let me know if you’d like further clarification or adjustments!
+
+
+#### Question 2:
+
+Now, I want to make sure that the calcualtions count which was done wordaccess count and the partial sum are correct?, why because I need to cleary verify the access count of the Frame based and the event driven(validation ) is the same. People have asked my question and I don't think just having ascript would be enough. I need to have step by step execution and present it like an animation as each and every value is calculated the word access is incremented respectively? 
+
+Is this possible to achieve
+
+Here is the frame based execution script
+
+def convolve_actual_frame_ws(input_matrix, weight_matrix, output_matrix, output_config, S=1):
+    """
+    Simulates a convolution with weight-stationary dataflow, enforcing 9 weight read transactions.
+
+    Args:
+        input_matrix: Shape [B, C, IY, IX] - Input feature map
+        weight_matrix: Shape [K, C, FY, FX] - Weight filters (8 filters, 1 channel, 3x3)
+        output_matrix: Shape [B, K, OY, OX] - Output feature map
+        output_config: Tuple (B, K, OY, OX) - Output dimensions
+        S: Stride (default=1)
+
+    Returns:
+        output_matrix: Updated output feature map
+        word_accesses: Dictionary with memory transactions for I, W, O
+        partial_sums: Number of multiply-accumulate operations
+    """
+    B, K, output_height, output_width = output_config
+    K, C, FY, FX = weight_matrix.shape  # K=8, C=1, FY=3, FX=3
+    _, _, IY, IX = input_matrix.shape
+
+    # Initialize counters for memory transactions
+    word_accesses = {
+        "I": 0,          # Input read transactions
+        "W": 0,          # Weight read transactions
+        "O": {"rd": 0, "wr": 0}  # Output read/write transactions
+    }
+    partial_sums = 0
+
+    # Temporal loops over filter dimensions and output spatial dimensions
+    for fx in range(FX):  # 0 to 2
+        for fy in range(FY):  # 0 to 2
+            # One weight read transaction per (fx, fy), fetching weight[k, c, fy, fx] for all k
+            word_accesses["W"] += 1
+            for ox in range(output_width):  # 0 to 2
+                for oy in range(output_height):  # 0 to 2
+                    # One input read transaction per (fx, fy, ox, oy)
+                    word_accesses["I"] += 1
+                    # One output read transaction to fetch partial sums for all k
+                    word_accesses["O"]["rd"] += 1
+                    # Parallel computation across all filters (k)
+                    for k in range(K):  # 0 to 7
+                        for c in range(C):  # 0 to 0 (C=1)
+                            ix = ox * S + fx
+                            iy = oy * S + fy
+                            if 0 <= iy < IY and 0 <= ix < IX:
+                                # Multiply-accumulate operation
+                                output_matrix[0, k, oy, ox] += (
+                                    input_matrix[0, c, iy, ix] * weight_matrix[k, c, fy, fx]
+                                )
+                                partial_sums += 1
+                    # One output write transaction to store updated partial sums for all k
+                    word_accesses["O"]["wr"] += 1
+
+    return output_matrix, word_accesses, partial_sums
+
+# Input: 1 batch, 1 channel, 5x5 spatial
+input_matrix = Input_data
+# Weights: 8 filters, 1 channel, 3x3 kernel
+weight_matrix = weights
+# Output: 1 batch, 8 filters, 3x3 spatial (assuming stride=1, no padding)
+output_matrix = np.zeros((1, 8, 3, 3))
+output_config = (1, 8, 3, 3)
+
+output, accesses, partial_sums = convolve_actual_frame_ws(
+    input_matrix, weight_matrix, output_matrix, output_config
+)
+
+print("****************************************************************Actual frame based calculator**********************************************************************")
+print("Convolution Output (Actual frame based calculator):")
+print(output)
+print("Word Accesses (Actual frame based calculator):", accesses)
+print("Partial Sums (Actual frame based calculator):", partial_sums)
+
+Here is the event based execution script
+
+def event_driven_calculation(input_matrix, weight_matrix, output_matrix, output_config, S=1):
+    """
+    Compute convolution with event-driven calculation, ensuring only necessary accesses and computations.
+
+    Parameters:
+    - input_matrix: Input data (B, C, IY, IX)
+    - weight_matrix: Weights (K, C, FY, FX)
+    - output_matrix: Output data (B, K, OY, OX)
+    - output_config: Tuple (B, K, output_height, output_width)
+    - S: Stride (default=1)
+
+    Returns:
+    - output_matrix: Updated output matrix
+    - word_accesses: Dictionary with counts for I, W, O (rd, wr)
+    - partial_sums: Total number of valid partial sum computations
+    """
+    B, K, output_height, output_width = output_config
+    _, C, IY_max, IX_max = input_matrix.shape
+    _, _, FY_max, FX_max = weight_matrix.shape
+
+    # Initialize counters
+    word_accesses = {
+        "I": 0,
+        "W": 0,
+        "O": {"rd": 0, "wr": 0}
+    }
+    partial_sums = 0
+
+    # Temporal Loops: IY, IX, FX, FY
+    for iy in range(IY_max):  # [0, 5)
+        for ix in range(IX_max):  # [0, 5)
+            # Access input once per (IY, IX)
+            word_accesses["I"] += 1
+            input_val = input_matrix[0, 0, iy, ix]  # B=1, C=1
+
+            for fy in range(FY_max):  # [0, 3)
+                for fx in range(FX_max):  # [0, 3)
+                    # Compute output position
+                    oy = (iy - fy) // S
+                    ox = (ix - fx) // S
+
+                    # Boundary check for valid (OY, OX)
+                    if (0 <= oy < output_height and
+                        0 <= ox < output_width and
+                        (iy - fy) % S == 0 and
+                        (ix - fx) % S == 0):
+                        # Access weights for valid position
+                        word_accesses["W"] += 1  # One vector access
+
+                        # Access output for all K
+                        word_accesses["O"]["rd"] += 1
+                        word_accesses["O"]["wr"] += 1
+
+                        # Spatial Loop: parfor K in [0, 8)
+                        for k in range(K):
+                            for c in range(C):
+                                weight_val = weight_matrix[k, c, fy, fx]
+                                output_matrix[0, k, oy, ox] += input_val * weight_val
+                                partial_sums += 1
+
+    return output_matrix, word_accesses, partial_sums
+
+# Example Usage
+B, K, C = 1, 8, 1  # Batch, output channels, input channels
+IY, IX = 5, 5      # Input size
+FY, FX = 3, 3      # Filter size
+OY, OX = 3, 3      # Output size
+
+input_matrix = Input_data
+weight_matrix = weights
+output_matrix = np.zeros((B, K, OY, OX))
+output_config = (B, K, OY, OX)
+
+conv_output, word_accesses, partial_sums = event_driven_calculation(
+    input_matrix, weight_matrix, output_matrix, output_config, S=1
+)
+
+print("****************************************************************Event driven case**********************************************************************")
+# Print results
+print("Convolution Output Matrix: (Event driven case)")
+print(conv_output)
+print("Word Accesses: (Event driven case)")
+print(f"I: {word_accesses['I']} reads")
+print(f"W: {word_accesses['W']} reads")
+print(f"O: {word_accesses['O']['rd']} reads, {word_accesses['O']['wr']} writes")
+print(f"Partial Sums: {partial_sums}")
+
+
+Here are the inputs, weights.
+
+Input_data = np.array([
+    [1,2,3,4,5],
+    [6,7,8,9,0],
+    [2,4,6,8,9],
+    [3,4,5,6,7],
+    [2,5,6,7,8]
+])
+Input_data = Input_data[np.newaxis, np.newaxis, :, :]  # Shape: (1, 1, 5, 5)
+print("Input_data shape:", Input_data.shape)
+print(Input_data)
+
+# Kernel data initialisation
+weights = np.array([
+    [[[4, 4, 4],
+      [4, 7, 5],
+      [7, 8, 6]]],
+
+    [[[5, 2, 3],
+      [7, 0, 3],
+      [0, 5, 5]]],
+
+    [[[4, 3, 7],
+      [3, 8, 4],
+      [7, 6, 3]]],
+
+    [[[7, 0, 0],
+      [9, 9, 7],
+      [0, 3, 5]]],
+
+    [[[0, 3, 0],
+      [6, 8, 8],
+      [1, 4, 2]]],
+
+    [[[4, 1, 6],
+      [5, 3, 9],
+      [1, 1, 8]]],
+
+    [[[5, 7, 5],
+      [4, 8, 9],
+      [2, 2, 0]]],
+
+    [[[7, 9, 9],
+      [2, 7, 1],
+      [6, 2, 4]]]
+])
+print(weights)
