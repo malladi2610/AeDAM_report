@@ -19,6 +19,14 @@ The main goal is to explain the high level idea of how the frame based and event
     - From the high level to the exploration level - [Include the compelete Dimension 1, 2 and 3]
 - [ ] Expected results of this thesis
 
+
+
+# Sections 
+- [ ] Frame based and Event based execution
+- [ ] What are exploration tools
+- [ ] How do they fucntion
+- [ ] Why they face challenge with event drive architectures
+
 ---------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 # Question 1: What is an exploration tool?
@@ -373,5 +381,10 @@ There are two broad classifications of the accelerator architecture i.e
 2. Event based execution
 
 Each type of accelerator has it's own advantage and disdavantage of the execution
+
+
+# Question 2: Frame based execution:
+
+
 
 

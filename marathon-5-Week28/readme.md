@@ -11,12 +11,12 @@
     5.4. (For kanishkan) Push the code in the Zigzag stream and AeDAM for his validation
 
 
-1. The thought process to build an algorithms is as follow
+<!-- 1. The thought process to build an algorithms is as follow
 
 1.1. [ ] Prove that there is a limiation with the zigzag over calculation not only by validation but in theory
 1.2  [ ] Build a basic algorithm to solve the problem and write it in a presentable manner
 1.3  [ ] Validate the algorithm by seperately testing it outside zigzag for Single layer, Lenet - 5 model, Other models given by kanishkan on TPU
-1.4  [ ] Propose a way to integrate it.
+1.4  [ ] Propose a way to integrate it. -->
 
 # Marathon closing 
 In this marathon I present the limitation of the zigzag tool not being able to give the correct extimation of the event driven nature, but in our specific case as the workload scales that particular issue of the over estimation solves on it's own means, it becomes negligible in terms of error which is acceptable in our situation

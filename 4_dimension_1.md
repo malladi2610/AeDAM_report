@@ -598,3 +598,11 @@ On modeling the lenet -5 on to the Single core architecture using zigzag the res
 
 
 On modeling the lenet - 5 on to the Multi-core architecture using zigzag the results are as follows compared to the actual event driven computing
+
+
+---------------------------------------------------------------------------------------------------------------------------------------------------------------
+# Sections
+
+- [ ] Single core exploration
+- [ ] Multi core exploration
+- [ ] How does it work
