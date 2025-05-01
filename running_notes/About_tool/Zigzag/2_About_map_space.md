@@ -1146,3 +1146,4 @@ Understanding the JSON output from ZigZag's mapping exploration involves deciphe
 - [Input Stationary Dataflow in Deep Learning Accelerators](https://arxiv.org/html/2403.09026v1)
 - [INCA Input-stationary Dataflow Deep Learning Accelerators](https://ieeexplore.ieee.org/document/10070992)
 
+
