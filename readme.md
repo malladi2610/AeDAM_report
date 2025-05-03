@@ -23,9 +23,9 @@
 4. Thesis Contribution
 
 5. Proposed tool flow
-5.1 Contribution 1
-5.2 Contribution 2
-5.3 Contribution 3
+5.1 Contribution 1 [Single core and Multi core flow with dense flow]
+5.2 Contribution 2 [Architecture Exploration]
+
 
 6. Results
 6.1 Setup and Validation

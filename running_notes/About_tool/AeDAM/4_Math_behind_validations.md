@@ -1,4 +1,279 @@
+# Section divisions
+This entire section is divided in four major sections
 
+1. Mapspace generated
+2. Word access computed (Critical path is included in this)
+3. latency Calculated (Cycles)
+4. Energy calculated (To be decided from the literature)
+
+------------------------------------------------------------------------------------------------------------------------------------------------------
+# General workload being modelled
+
+The workload is being modelled in two different cases:
+1. Frame based inputs
+2. Event driven inputs
+
+## Frame based inputs
+
+The exploration workload on the event driven architecture is a Seven dimension nested loop structure as shown below 
+
+**Shapes**  
+- Input tensor: \(Inputs\in\mathbb R^{IH\times IW\times C}\)  
+- Filter bank: \(Weights\in\mathbb R^{FH\times FW\times C\times K}\)  
+- Output tensor: \(Outputs\in\mathbb R^{OH\times OW\times K}\)  
+where, for unit stride and no padding,  
+\[
+OH = IH - FH + 1, 
+\quad
+OW = IW - FW + 1.
+\]
+
+
+
+**7-nested-sum (index) formula**  
+For all  
+\[
+0 \le oh < OH,\quad
+0 \le ow < OW,\quad
+0 \le k < K
+\]
+\[
+Y(oh,\,ow,\,k)
+\;=\;
+\sum_{c=0}^{C-1}
+\;\sum_{fh=0}^{FH-1}
+\;\sum_{fw=0}^{FW-1}
+\;
+X\bigl(oh + fh,\;ow + fw,\;c\bigr)
+\;\times\;
+W\bigl(fh,\;fw,\;c,\;k\bigr)
+\]
+
+
+
+**Equivalent nested-loop pseudocode**  
+```cpp
+// assume OH = IH-FH+1, OW = IW-FW+1
+for (int oh = 0; oh < OH; ++oh)           // output rows
+  for (int ow = 0; ow < OW; ++ow)         // output cols
+    for (int k  = 0; k  < K;  ++k) {       // output channels
+      Y[oh][ow][k] = 0;
+      for (int c  = 0;  c  < C;  ++c)      // input channels
+        for (int fh = 0; fh < FH; ++fh)   // filter height
+          for (int fw = 0; fw < FW; ++fw) // filter width
+            Outputs[oh][ow][k] +=
+              Inputs[oh + fh][ow + fw][c]    // input pixel
+              * Weights[fh][fw][c][k];        // filter weight
+    }
+```
+## Event Driven inputs
+
+In an **event-driven** accelerator, instead of walking through the entire output tensor one element at a time, we process **one “event”** at a time and immediately fire off all of its contributions before moving on.  An event might be:
+
+- **A pixel‐intensity change** in a Dynamic Vision Sensor (DVS) camera—each pixel reports asynchronously when its log-brightness crosses a threshold  ([Event-based Vision - Guillermo Gallego - Google Sites](https://sites.google.com/view/guillermogallego/research/event-based-vision?utm_source=chatgpt.com)).  
+- **A spike output** from a spiking neural network layer—each neuron emits a graded or binary “spike” that must be integrated into downstream neuron states  ([Frontiers | Optimizing event-based neural networks on digital neuromorphic architecture: a comprehensive design space exploration](https://www.frontiersin.org/journals/neuroscience/articles/10.3389/fnins.2024.1335422/full)).  
+- **A feature detection event** (e.g.\ a corner or edge) produced by a front-end module, or even  
+- **An audio‐onset event** in neuromorphic audio processing, a LiDAR return, etc.  
+
+Once an event has been processed—meaning all its multiply-accumulate contributions have been vectorized and applied—it never needs to revisit the accelerator’s pipeline.
+
+#### Loop reordering: from “output-dominated” to “input-dominated”
+
+Standard convolution is **output-dominated**, looping over each output coordinate and then summing over its receptive field. In contrast, an **input-dominated** (event-driven) ordering loops over each incoming activation and then fans out its contributions to all affected outputs:
+
+```cpp
+// assume OH = IH−FH+1, OW = IW−FW+1
+// Inputs:  I[ih][iw][c]
+// Weights: W[fh][fw][c][k]
+// Outputs: O[oh][ow][k]
+
+for (int ih = 0; ih < IH; ++ih)           // (1) input row
+  for (int iw = 0; iw < IW; ++iw)         // (2) input col
+    for (int c  = 0; c  < C;  ++c) {      // (3) input channel
+      // process one “event” I[ih][iw][c]
+      for (int fh = 0; fh < FH; ++fh)    // (4) filter row
+        for (int fw = 0; fw < FW; ++fw)  // (5) filter col
+          for (int k  = 0; k  < K;  ++k)  // (6) output channel
+            O[ih−fh][iw−fw][k] +=
+              I[ih][iw][c]               // input event
+            * W[fh][fw][c][k];           // filter weight
+    }
+```
+
+1.  **Spatial loops outer** (`ih`, `iw`) sweep over each input location exactly once.  
+2.  **Channel loop** (`c`) steps through every input feature channel at that location.  
+3.  **Filter‐window loops** (`fh`, `fw`) project that single activation across the kernel’s spatial support.  
+4.  **Output‐channel loop** (`k`) vectorizes the multiply–accumulate across all filters in one go.  
+ 
+To tweak loop‐nesting for data‐layout or vectorization on your target accelerator, the key is: **input spatial & channel loops come first**, then **filter & output-channel loops**.  
+
+---
+
+**References**  
+- W. Xu et al., “Optimizing event-based neural networks on digital neuromorphic architecture…”, *Frontiers in Neuroscience*, 28 Mar 2024.  ([Frontiers | Optimizing event-based neural networks on digital neuromorphic architecture: a comprehensive design space exploration](https://www.frontiersin.org/journals/neuroscience/articles/10.3389/fnins.2024.1335422/full))  
+- G. Gallego et al., “Event-based Vision: A Survey”… Bio-inspired sensors output asynchronous pixel-level “events” when brightness changes.  ([Event-based Vision - Guillermo Gallego - Google Sites](https://sites.google.com/view/guillermogallego/research/event-based-vision?utm_source=chatgpt.com))  
+- T. Serrano-Gotarredona & B. Linares-Barranco, “AER Image Filtering Architecture for Vision Processing Systems”, *IEEE Trans. Circuits Syst.* Sep 1999—first spatial event-driven convolution mapping.  ([Event camera](https://en.wikipedia.org/wiki/Event_camera?utm_source=chatgpt.com))
+
+------------------------------------------------------------------------------------------------------------------------------------------------------
+# Mapspace generated
+
+This parameters is depended on two major variables 
+1. Spatial Unrolling possible
+2. Temporal Unrolling levels (Loop tiling levels)
+(it starts from 4 and goes until 10 and can go more too dependent on the workload size)
+
+To generate the event driven map space the thumb rules follwed are **input spatial & channel loops come first**, then **filter & output-channel loops**.  
+
+The spatial unrolling is possible FH, FW, K to achieve event driven modelling (Citations backed from Multiply and fire) and for the temporal unrolling by fixing the IX, IY and C in the posistion and varying the rest of the variables FX, FY and K and performing the Tiliing also with respectivevalid splitting a map space can be generated.
+
+Here is the formula for the map space generated.
+
+
+| Your step                                                                                                      | What LOMA says                                                                             | Match? | Notes                                                                                                                                                |
+| -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+|  1. Pick the spatially‑unrolled dimensions                                                                     | *“First, we extract the LPFs … the spatially‑unrolled dimensions are discarded.”*          | ✔      | Same idea—take out what is already mapped in space before touching temporal loops.                                                                   |
+|  2. Prime‑factorise each remaining loop up to an LPF limit                                                     | LOMA’s *Loop‑Prime‑Factor Generation* (Step A) and the optional *LPF‑limit lumping*        | ✔      | The “LPF limit” knob is exactly LOMA’s speed/optimality trade‑off.                                                                                   |
+|  3. Break / lump factors so the total LPF count meets the limit                                                | *“LOMA will lump the smallest LPFs of the loop type with the most LPFs.”*                  | ✔      | Your “break … to achieve the required LPF limit” is the same heuristic.                                                                              |
+|  4. Fix outer loops (IX, IY, C) and inner loops (FX, FY, K) for event‑driven dataflow                          | LOMA lets the **user** impose any ordering constraints before the permutation engine runs  | ✔      | You are simply providing extra constraints suited to an input‑dominated/event‑driven schedule.                                                       |
+|  5. Enumerate every legal permutation inside the outer group, the inner group, **and** across the middle loops | LOMA Step B: partial multiset permutations per loop type, then recombine into full orders  | ✔      | The only difference is that you pre‑partition the search space into ⟨outer⟩ • ⟨middle⟩ • ⟨inner⟩ blocks; that is a valid subset of the global space. |
+
+Bottom line: **your procedure is fully consistent with the LOMA search strategy; you are just adding the event‑driven constraint that input‑space loops stay outermost and kernel loops stay innermost.**
+
+---
+## Algorithm
+
+```python
+# INPUT ---------------------------------------------------------------
+dims = {            # full layer sizes
+    "IX": IH, "IY": IW, "C": C,
+    "FX": FH, "FY": FW, "K": K,
+    # add any other loops (B, OX, OY …) if relevant
+}
+unroll = {"C": Cu, "K": Ku}  # PE‑array spatial unrolling
+LPF_LIMIT = 9                # user knob (set None for exhaustive)
+
+# STEP 1  ▸ remove the part already unrolled in space
+residual = {l: dims[l] // unroll.get(l, 1) for l in dims}
+
+# STEP 2  ▸ prime‑factorise every residual loop
+factors = {l: multiset_prime_factors(residual[l]) for l in residual}
+
+# STEP 3  ▸ optional LPF lumping to respect LPF_LIMIT
+if LPF_LIMIT and sum(len(p) for p in factors.values()) > LPF_LIMIT:
+    lump_smallest_LPFs(factors, LPF_LIMIT)  # LOMA heuristic
+
+# STEP 4  ▸ partition into outer, middle, inner groups (event‑driven)
+G_outer = factors["IX"] + factors["IY"] + factors["C"]
+G_inner = factors["FX"] + factors["FY"] + factors["K"]
+G_mid   = [f for l,p in factors.items()
+              if l not in ("IX","IY","C","FX","FY","K")
+              for f in p]
+
+# STEP 5  ▸ generate the map space
+for perm_o in multiset_perms(G_outer):      # outer permutations
+    for perm_m in partial_perms_by_looptype(G_mid):  # LOMA Step B
+        for perm_i in multiset_perms(G_inner):        # inner perms
+            yield perm_o + perm_m + perm_i            # one loop order
+```
+
+*Helper routines*
+
+* `multiset_prime_factors(n)` returns the multiset of prime factors of *n*.
+* `lump_smallest_LPFs(...)` repeatedly multiplies the two smallest factors of the loop type with the largest count until the global LPF count ≤ `LPF_LIMIT` (LOMA §III‑E).
+* `multiset_perms(S)` produces **unique** permutations of the multiset *S* (Python example: `itertools.permutations` + hash set, or the lightweight multiset generator referenced in LOMA \[14]).
+* `partial_perms_by_looptype(L)` implements LOMA Step B: generate permutations separately per loop type and stitch them together; this cuts the combinatorial blow‑up.
+
+
+#### Closed‑form upper bound on the number of loop orders
+
+Let
+
+* $n_o =$ total LPFs in the outer group, with counts $\{n_{ix},n_{iy},n_c\}$
+* $n_i =$ total LPFs in the inner group, with counts $\{n_{fx},n_{fy},n_k\}$
+* $n_m =$ total LPFs in the middle group, divided over loop types $t\in M$ with counts $n_t$
+
+Then
+
+$$
+\underbrace{\frac{n_o!}{n_{ix}!\,n_{iy}!\,n_{c}!}}_{\text{outer perms}}
+\; \times\;
+\Bigl(\prod_{t\in M}\frac{n_t!}{\prod_{p\in t} m_{tp}!}\Bigr)
+_{\text{LOMA Step B partial perms}}
+\; \times\;
+\underbrace{\frac{n_i!}{n_{fx}!\,n_{fy}!\,n_{k}!}}_{\text{inner perms}}
+$$
+
+is an upper bound on the number of unique loop‑order candidates explored.
+
+Because we permute multisets **inside each block only**, the true count is often orders‑of‑magnitude smaller than a full $(n_o+n_m+n_i)!$ permutation, exactly as LOMA observes (12 600 vs 3.6 million in Fig. 3) .
+
+
+#### Why the event‑driven fix (IX IY C … FX FY K) makes sense
+
+* In an input‑dominated schedule the activation *arrives once*, so holding IX/IY/C outermost maximises on‑chip reuse of that value before it is discarded.
+* Making FX/FY/K innermost ensures every MAC fed by that activation is hit back‑to‑back; the accelerator can fully vectorise over filter taps and output channels in a single cycle.
+* LOMA places no restriction on *where* a loop sits, so the above ordering is just an additional user constraint that narrows the map space without violating optimality guarantees for **that** subset.
+
+<!-- ---
+
+\### Slide‑ready takeaway
+
+> **Event‑driven map‑space generation = LOMA + fixed I/O kernel blocks**
+> 1️⃣ discard spatially‑unrolled sizes 2️⃣ prime‑factorise loops (LPFs) 3️⃣ optionally lump LPFs ≤ limit 4️⃣ force 〈IX IY C〉 outer, 〈FX FY K〉 inner 5️⃣ multiset‑permute outer, middle, inner blocks ⇒ loop‑order candidates.
+
+All steps are directly grounded in the LOMA methodology , so your validation procedure is sound. -->
+
+---
+# Data Path for the event driven accelerator
+
+For an event driven accelerator the data path is different than the traditional frame based acceleratordue to which the memory allocation step for the variable is different.
+
+Here is the difference b/w the data allocation path frame based and event based.
+
+* **Input events** arrive over the on-chip network (NoC) and go directly into the RISC-V controller (not to SRAM).  They’re immediately preprocessed into micro-tasks and fed to the loop controller; there is no buffering of the raw events in Data Memory .
+* **Weights** reside in the Data Memory (a 256 KB SRAM).  During each event, the loop controller issues a DMEM read to fetch the appropriate weight into the NPE register file, all on the fly .
+* **Partial sums / neuron states** are accumulated in the NPEs’ registers and then written back into the same SRAM bank as they’re updated .
+* **Output spikes** are generated by the event-generator block (which inspects NPE registers), pushed into an output FIFO, post-processed by RISC-V, and then sent back out over the NoC .
+
+---
+
+### Frame-based vs. Event-driven: Data-movement comparison
+
+| **Aspect**                     | **Frame-based (Eyeriss)**                                                                                                                                  | **Event-driven (Seneca)**                                                                                                                                                  |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Input handling**             | Full input feature maps (“frames”) are read from off-chip DRAM into the on-chip Global Buffer (GLB), then streamed via the NoC into each PE’s local SPAD.  | Individual “spikes” arrive over the NoC directly into the controller; they are **never** stored in SRAM, but immediately turned into micro-tasks for the loop controller.  |
+| **Weight access**              | All filter weights are pre-loaded (or prefetched) from DRAM into the GLB, then broadcast or unicast via the NoC into SPADs for reuse.                      | Weights remain in SRAM.  Each event issues a DMEM read to fetch just the needed weights into NPE registers on demand.                                                      |
+| **Partial-sum (psum) storage** | Psums are accumulated in SPAD and/or routed through neighboring PEs for spatial reduction, then written back to the GLB before DRAM write-back.            | Psums (neuron states) are held in NPE registers and after each update are **stored back** to SRAM (DMEM) immediately.                                                      |
+| **Output handling**            | Entire output feature maps are collected in the GLB, optionally compressed, and then written out in bulk to DRAM.                                          | When a neuron fires, the event generator creates an output packet, which RISC-V post-processes and streams out via the NoC—no bulk frame buffer is ever used.              |
+| **Local buffering**            | Dedicated SPADs for ifmap, weight, and psum per PE (12 b, 224 b, 24 b widths) plus a 108 kB GLB shared across PEs.                                         | Small register-file per NPE (e.g. 256 B) plus a 2 Mb SRAM “Data Memory.”  Task FIFOs and Loop Buffer registers hold micro-tasks and micro-code.                            |
+| **Network**                    | Custom NoC with three separate networks (multicast GIN for inputs/weights, GON for psums, and 1-hop links for psum chaining).                              | Minimal-footprint NoC optimized for lightweight multicasting of events (source-based routing tables) and variable-length packets.                                          |
+| **Flow granularity**           | Coarse: whole frames (tiled) are staged through multiple passes, with large bursts of data movement and deep reuse.                                        | Fine: individual events (spikes) trigger tiny, localized data movements and instant computation, with no reuse across events.                                              |
+
+---
+
+### Seneca’s critical data-paths
+
+* **Input path**
+  `NoC → RISC-V controller → Task FIFO → Loop controller → NPE register file`
+  Events stream in, interrupt RISC-V, and immediately flow into the loop engine—never touching SRAM .
+
+* **Weight path**
+  `SRAM (DMEM) → loop controller issues DMEM read → NPE register file → MAC units`
+  Each event triggers a direct SRAM read of its associated weight into the NPEs .
+
+* **Partial-sum path**
+  `NPE register file accumulates → DMEM write`
+  Updated neuron states (partial sums) are written back immediately into SRAM .
+
+* **Output path**
+  `NPE registers → Event generator → output FIFO → RISC-V post-processing → NoC`
+  As soon as a neuron’s threshold is crossed, the event generator forms a packet, which RISC-V then dispatches over the NoC .
+
+
+
+
+------------------------------------------------------------------------------------------------------------------------------------------------------
+# Word access computed
 ## Understaning the wordaccess 
 Can you help me in understanding the word access results from Zigzag.
 

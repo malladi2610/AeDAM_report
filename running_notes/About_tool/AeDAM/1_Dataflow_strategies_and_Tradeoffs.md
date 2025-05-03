@@ -14,4 +14,4 @@ Final output will be a comprehensive document that I explain the traditional Dat
 
 Here is the link from the Gemini research - https://docs.google.com/document/d/1lPi_p1MK0SQLg3L7FJHEmvp8Da3yfOKVFkCKe6t6WPM/edit?usp=sharing.
 
-Summarising all the dataflows
+The above arcticle summarises  all the dataflows Output stationary, Input stationary, Weight stationary and event driven is missing and needs to be added
