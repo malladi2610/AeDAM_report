@@ -606,3 +606,20 @@ On modeling the lenet - 5 on to the Multi-core architecture using zigzag the res
 - [ ] Single core exploration
 - [ ] Multi core exploration
 - [ ] How does it work
+
+
+----
+
+# Start from here
+
+The ideal complete flow from the sparsity to multicore to the single core.
+
+
+Similar to the slides explain the single core DSE process.
+
+
+Here is the flow it will follow
+
+Mapspace → (For a single mapping) Path creation (in Mapping object) → Memory utilisation → Memory word access → (Split) 
+    → (For latency) → Double buffer detection → Transfer cycle calculation → Port activity calculation → Latency calculation
+    → (For energy) → MAC energy + Memory energy calculation

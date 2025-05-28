@@ -107,7 +107,7 @@ for (int ih = 0; ih < IH; ++ih)           // (1) input row
  
 To tweak loop‐nesting for data‐layout or vectorization on your target accelerator, the key is: **input spatial & channel loops come first**, then **filter & output-channel loops**.  
 
----
+
 
 **References**  
 - W. Xu et al., “Optimizing event-based neural networks on digital neuromorphic architecture…”, *Frontiers in Neuroscience*, 28 Mar 2024.  ([Frontiers | Optimizing event-based neural networks on digital neuromorphic architecture: a comprehensive design space exploration](https://www.frontiersin.org/journals/neuroscience/articles/10.3389/fnins.2024.1335422/full))  
@@ -139,7 +139,7 @@ Here is the formula for the map space generated.
 
 Bottom line: **your procedure is fully consistent with the LOMA search strategy; you are just adding the event‑driven constraint that input‑space loops stay outermost and kernel loops stay innermost.**
 
----
+
 ## Algorithm
 
 ```python
@@ -249,7 +249,7 @@ Here is the difference b/w the data allocation path frame based and event based.
 | **Network**                    | Custom NoC with three separate networks (multicast GIN for inputs/weights, GON for psums, and 1-hop links for psum chaining).                              | Minimal-footprint NoC optimized for lightweight multicasting of events (source-based routing tables) and variable-length packets.                                          |
 | **Flow granularity**           | Coarse: whole frames (tiled) are staged through multiple passes, with large bursts of data movement and deep reuse.                                        | Fine: individual events (spikes) trigger tiny, localized data movements and instant computation, with no reuse across events.                                              |
 
----
+
 
 ### Seneca’s critical data-paths
 
@@ -269,1071 +269,876 @@ Here is the difference b/w the data allocation path frame based and event based.
   `NPE registers → Event generator → output FIFO → RISC-V post-processing → NoC`
   As soon as a neuron’s threshold is crossed, the event generator forms a packet, which RISC-V then dispatches over the NoC .
 
-
-
-
 ------------------------------------------------------------------------------------------------------------------------------------------------------
-# Word access computed
-## Understaning the wordaccess 
-Can you help me in understanding the word access results from Zigzag.
 
-Here are workload and hardware comfigurations 
+# Word access computation
 
-Here is the workload dimensions:
+From the context of the Architecture bounds, mapspace created and the critical path. Word access is computed
 
-- id: 0 # Conv2
-  name: layer_2
-  operator_type: Conv
-  equation: O[b][k][oy][ox]+=W[k][c][fy][fx]*I[b][c][iy][ix]
-  dimension_relations: [ix=1*ox+1*fx, iy=1*oy+1*fy]
-  loop_dims: [B, K, C, OY, OX, FY, FX]
-  loop_sizes: [1, 1, 1, 12, 12, 5, 5]
-  operand_precision:
-    W: 8
-    I: 8
-    O: 8
-    O_final: 16
-  operand_source:
-    I: 0
-    W: 0
+### 1. Context: LOMA’s Memory Assignment
 
-Here is the architecture that is being modelled
-name: Event_Driven_Accelerator
+Once LOMA has picked an LPF ordering and assigned each loop (and hence each operand) to a level in the memory hierarchy, it hands off two key pieces of information to the cost model:
 
-operational_array:
-  unit_energy: 0.04  # for ANN MAC operations
-  unit_area: 1
-  dimensions: [D1]
-  sizes: [8]  # 8 NPEs
+* **`mapping.mem_level[layer_op]`**: how many levels deep each operand is stored
+* **`mapping.unit_mem_data_movement[layer_op][lvl]`**: metadata about how many words move per period, their precision, and how many transfer periods occur
 
-memories:
-  register:
-    size: 64  # words, e.g., 64x16b for NPE register files
-    r_bw: 128  # high bandwidth for fast access
-    w_bw: 128
-    r_cost: 0.1  # low energy cost, e.g., 8-12 pJ
-    w_cost: 0.1
-    area: 0.01  # small area per instance
-    r_port: 4
-    w_port: 3
-    rw_port: 0
-    latency: 1  # <1 ns (Has to been an integer as per zigzag modelling, So 1ns)
-    operands: [I1,I2,O]
-    ports:
-      - tl: r_port_1
-        fh: w_port_1
-      - tl: r_port_2
-        fh: w_port_2
-      - th: r_port_3
-        fh: w_port_3
-        tl: r_port_4
-    served_dimensions: []
+*(LOMA’s Memory Allocation is described in §III-D of the LOMA paper) *
 
-  sram:
-    size: 262144  # 256 KB, e.g., 2 Mb Data Memory
-    r_bw: 128
-    w_bw: 128
-    r_cost: 10.5  # medium energy cost, e.g., 180-220 pJ
-    w_cost: 12.8
-    area: 1
-    r_port: 3
-    w_port: 3
-    rw_port: 0
-    latency: 2  # 2 ns
-    operands: [I2, O]
-    ports:
-        - tl: r_port_1
-          fh: w_port_1
-        - fh: w_port_2
-          tl: r_port_2
-          fl: w_port_3
-          th: r_port_3
-    served_dimensions: [D1]
 
-  shared_memory_Weights:
-    size: 33554432  # 32 MB, e.g., for STT-MRAM
-    r_bw: 64  # lower bandwidth
-    w_bw: 64
-    r_cost: 2000  # high energy cost, e.g., 2000 pJ
-    w_cost: 2000
-    area: 2
-    r_port: 1
-    w_port: 0
-    rw_port: 0
-    latency: 10  # higher latency, e.g., 2x SRAM
-    operands: [I2]
-    ports:
-      - tl: r_port_1
-    served_dimensions: [D1]
 
-  shared_memory_inputs_outputs:
-    size: 33554432  # 32 MB, e.g., for STT-MRAM
-    r_bw: 64  # lower bandwidth
-    w_bw: 64
-    r_cost: 2000  # high energy cost, e.g., 2000 pJ
-    w_cost: 2000
-    area: 2
-    r_port: 2
-    w_port: 1
-    rw_port: 0
-    latency: 10  # higher latency, e.g., 2x SRAM
-    operands: [I1, O]
-    ports:
-      - tl: r_port_1
-      - tl: r_port_2
-        fl: w_port_1
-    served_dimensions: [D1]
+### 2. High-Level Algorithm (Pseudocode)
 
-On running the outputs here are the following wordaccess readings  and beset loop ordering from the zigzag:
+```python
+from math import ceil
+from zigzag.mapping.data_movement import DataDirection, DataMoveAttr
 
-Based on the loop ordering below the wordaccess readings are generated
-
-Here is the loop ordering that is followed
-======================================================================================================================================
-Temporal Loops                     O                                W                                I                                
-======================================================================================================================================
-for OX in [0, 3):                  sram                             sram                             shared_memory_inputs_outputs     
---------------------------------------------------------------------------------------------------------------------------------------
-  for OX in [0, 4):                sram                             sram                             shared_memory_inputs_outputs     
---------------------------------------------------------------------------------------------------------------------------------------
-    for OY in [0, 3):              sram                             sram                             shared_memory_inputs_outputs     
---------------------------------------------------------------------------------------------------------------------------------------
-      for OY in [0, 4):            sram                             sram                             shared_memory_inputs_outputs     
---------------------------------------------------------------------------------------------------------------------------------------
-        for FY in [0, 5):          register                         sram                             shared_memory_inputs_outputs     
---------------------------------------------------------------------------------------------------------------------------------------
-          for FX in [0, 5):        register                         sram                             register                         
---------------------------------------------------------------------------------------------------------------------------------------
-======================================================================================================================================
-Spatial Loops                                                                                                                         
-======================================================================================================================================
-            parfor K in [0, 1):                                                                                                       
---------------------------------------------------------------------------------------------------------------------------------------
-
-
-Here are the word access readings
-"word_accesses": {
-                "O": [
-                    {
-                        "rd ^": 144,
-                        "wr v": 0,
-                        "rd v": 3600,
-                        "wr ^": 3600
-                    },
-                    {
-                        "rd ^": 18,
-                        "wr v": 0,
-                        "rd v": 0,
-                        "wr ^": 144
-                    },
-                    {
-                        "rd ^": 0,
-                        "wr v": 0,
-                        "rd v": 0,
-                        "wr ^": 36
-                    }
-                ],
-                "W": [
-                    {
-                        "rd ^": 0,
-                        "wr v": 3600,
-                        "rd v": 3600,
-                        "wr ^": 0
-                    },
-                    {
-                        "rd ^": 0,
-                        "wr v": 2,
-                        "rd v": 3600,
-                        "wr ^": 0
-                    },
-                    {
-                        "rd ^": 0,
-                        "wr v": 0,
-                        "rd v": 4,
-                        "wr ^": 0
-                    }
-                ],
-                "I": [
-                    {
-                        "rd ^": 0,
-                        "wr v": 720,
-                        "rd v": 3600,
-                        "wr ^": 0
-                    },
-                    {
-                        "rd ^": 0,
-                        "wr v": 0,
-                        "rd v": 720,
-                        "wr ^": 0
-                    }
-                ]}
-
-
-
-Adding context to what "rd^, wr v, rd v, wr ^" means in the wordaccess are 
-
-rd^ - to high, meaning the data is read out from the current level of memory to go to the higher level of memory
-wr V - from high, meaning the data is provided by the higher level of memory to be written to the current level of memory
-rd V - to low, meaning the data is read out from the current level of memory to go to the lower level of memory
-wr ^ - from low, meaning the data is provided by the lower level of memory to be written to the current level of memory
-
-The memory layout order is as follows
-"mem_hierarchy_dict": {
-                "I1": [
-                    "MemoryLevel(instance=register,operands=[I1, I2, O], served_dimensions=set())",
-                    "MemoryLevel(instance=shared_memory_inputs_outputs,operands=[I1, O], served_dimensions={D1})"
-                ],
-                "I2": [
-                    "MemoryLevel(instance=register,operands=[I1, I2, O], served_dimensions=set())",
-                    "MemoryLevel(instance=sram,operands=[I2, O], served_dimensions={D1})",
-                    "MemoryLevel(instance=shared_memory_Weights,operands=[I2], served_dimensions={D1})"
-                ],
-                "O": [
-                    "MemoryLevel(instance=register,operands=[I1, I2, O], served_dimensions=set())",
-                    "MemoryLevel(instance=sram,operands=[I2, O], served_dimensions={D1})",
-                    "MemoryLevel(instance=shared_memory_inputs_outputs,operands=[I1, O], served_dimensions={D1})"
-                ]}
-
-
-With all the infomation. Can you find a relation on how the wordaccess values are actually arrived to as those values are not making much sense to me and need to understand how they are derived to.
-
-If you need cost model of the zigzag which it uses for the wordaccess calculation I can provide that too, for better understanding and explanantion. Let me know
-
-#### Answer:
-To understand how the word access values are calculated in ZigZag for your specific workload and hardware configuration, let’s break it down systematically based on the provided workload dimensions, hardware architecture, loop ordering, and memory hierarchy. The goal is to explain the derivation of the `"rd ^"`, `"wr v"`, `"rd v"`, and `"wr ^"` values for each operand (`O`, `W`, `I`) at each memory level.
-
----
-
-### Step 1: Understanding the Workload and Computation
-The workload is a convolutional layer defined as:
-
-- **Equation**: `O[b][k][oy][ox] += W[k][c][fy][fx] * I[b][c][iy][ix]`
-- **Dimension Relations**: `ix = ox + fx`, `iy = oy + fy` (stride = 1)
-- **Loop Dimensions and Sizes**:
-  - `B` (batch size) = 1
-  - `K` (output channels) = 1
-  - `C` (input channels) = 1
-  - `OY` (output height) = 12
-  - `OX` (output width) = 12
-  - `FY` (filter height) = 5
-  - `FX` (filter width) = 5
-
-**Total MAC Operations**:
-For each output element `O[b][k][oy][ox]`, we perform a sum over `c`, `fy`, and `fx`. Since `C = 1`, it’s a 2D convolution over `FY` and `FX`:
-- Number of MACs per output pixel = `FY * FX = 5 * 5 = 25`
-- Total output pixels = `B * K * OY * OX = 1 * 1 * 12 * 12 = 144`
-- Total MACs = `144 * 25 = 3600`
-
-**Input Dimensions**:
-- `IY = OY + FY - 1 = 12 + 5 - 1 = 16`
-- `IX = OX + FX - 1 = 12 + 5 - 1 = 16`
-- Input size = `16 x 16 = 256` elements
-
-**Weight Dimensions**:
-- `W[K][C][FY][FX] = W[1][1][5][5] = 25` weights
-
-This gives us the computational demand: 3600 MACs to produce 144 output elements, using 25 weights and accessing a 16x16 input array.
-
----
-
-### Step 2: Memory Hierarchy and Access Notation
-The memory hierarchy for each operand is:
-
-- **O (Output)**:
-  1. Register
-  2. SRAM
-  3. Shared Memory for Inputs/Outputs
-- **W (Weights)**:
-  1. Register
-  2. SRAM
-  3. Shared Memory for Weights
-- **I (Input)**:
-  1. Register
-  2. Shared Memory for Inputs/Outputs
-
-**Word Access Notation**:
-- `rd ^`: Read from current level to a higher level.
-- `wr v`: Write to current level from a higher level.
-- `rd v`: Read from current level to a lower level (e.g., to operational array or lower memory).
-- `wr ^`: Write to current level from a lower level.
-
-For the register level (lowest), `rd v` typically means reads to the operational array, and `wr ^` means writes from the operational array. For higher levels, data moves between memory levels or to/from the register.
-
----
-
-### Step 3: Loop Ordering and Tiling
-The loop ordering uses tiling for `OX` and `OY`, with temporal loops nested as follows:
-
-- **Tiling**:
-  - `OX = 12` split into tiles: outer `for OX in [0,3)` (3 tiles), inner `for OX in [0,4)` (4 elements per tile), so `3 * 4 = 12`.
-  - `OY = 12` split similarly: outer `for OY in [0,3)` (3 tiles), inner `for OY in [0,4)` (4 elements per tile).
-  - Total tiles = `3 * 3 = 9`, each tile computing a `4x4` block (16 outputs).
-
-- **Nested Loops** (interpreted):
-  ```pseudo
-  for OX_tile in [0,3):  // 3 tiles
-    for OY_tile in [0,3):  // 3 tiles
-      for OX in [OX_tile*4, OX_tile*4+4):  // 4 OX per tile
-        for OY in [OY_tile*4, OY_tile*4+4):  // 4 OY per tile
-          for FY in [0,5):  // 5
-            for FX in [0,5):  // 5
-              parfor K in [0,1):  // K=1, so 1 iteration
-  ```
-
-- **Memory Levels per Loop**:
-  - Outer `OX` and `OY` loops: `O` and `W` use SRAM, `I` uses Shared Memory for Inputs/Outputs.
-  - `FY`: `O` uses Register, `W` uses SRAM, `I` uses Shared Memory for Inputs/Outputs.
-  - `FX`: `O` uses Register, `W` uses SRAM, `I` uses Register.
-
-This suggests that inner loops (`FY`, `FX`) operate at the register level where possible, while outer loops manage data from higher memories.
-
----
-
-### Step 4: Calculating Word Accesses
-Let’s derive the word access values for each operand based on the computation and loop schedule.
-
-#### **Operand O (Output)**:
-**Memory Levels**:
-1. Register
-2. SRAM
-3. Shared Memory for Inputs/Outputs
-
-**Word Accesses**:
-```json
-"O": [
-    { "rd ^": 144, "wr v": 0, "rd v": 3600, "wr ^": 3600 },  // Register
-    { "rd ^": 18, "wr v": 0, "rd v": 0, "wr ^": 144 },      // SRAM
-    { "rd ^": 0, "wr v": 0, "rd v": 0, "wr ^": 36 }         // Shared Memory
-]
-```
-
-- **Register Level**:
-  - Each MAC reads the current partial sum, updates it, and writes it back.
-  - Total MACs = 3600.
-  - `rd v` = 3600: Read partial sum from register to operational array for each MAC.
-  - `wr ^` = 3600: Write updated partial sum from operational array to register.
-  - `rd ^` = 144: After computing each `O[oy][ox]` (25 MACs), the final value is sent to SRAM. Total outputs = 144.
-  - `wr v` = 0: No initial loads from SRAM, as outputs are computed from scratch.
-
-- **SRAM Level**:
-  - `wr ^` = 144: 144 final outputs written from register to SRAM.
-  - `rd ^` = 18: SRAM sends data to Shared Memory. With 9 tiles (3x3), this suggests some aggregation (e.g., 144 outputs moved in fewer transactions), but 18 is unexpected (expect 9 or 144). Possibly a larger block transfer or optimization artifact.
-  - `rd v` = 0, `wr v` = 0: No reads to register (outputs aren’t reused here), no writes from Shared Memory.
-
-- **Shared Memory Level**:
-  - `wr ^` = 36: Outputs written from SRAM to Shared Memory. If 144 outputs are aggregated into larger blocks (e.g., 4 outputs per word or multiple tiles), 36 suggests further data packing, though exact derivation is unclear without the cost model.
-  - Others = 0: No reads or writes in other directions.
-
-#### **Operand W (Weights)**:
-**Memory Levels**:
-1. Register
-2. SRAM
-3. Shared Memory for Weights
-
-**Word Accesses**:
-```json
-"W": [
-    { "rd ^": 0, "wr v": 3600, "rd v": 3600, "wr ^": 0 },  // Register
-    { "rd ^": 0, "wr v": 2, "rd v": 3600, "wr ^": 0 },     // SRAM
-    { "rd ^": 0, "wr v": 0, "rd v": 4, "wr ^": 0 }         // Shared Memory
-]
-```
-
-- **Register Level**:
-  - `rd v` = 3600: Each MAC reads a weight from register to operational array.
-  - `wr v` = 3600: Weights loaded from SRAM to register 3600 times. With only 25 weights, this suggests no reuse; each MAC fetches `W[k][c][fy][fx]` anew due to `FY` and `FX` loops using SRAM, not register.
-  - `rd ^` = 0, `wr ^` = 0: No movement to/from other levels beyond SRAM.
-
-- **SRAM Level**:
-  - `rd v` = 3600: SRAM supplies weights to register for each MAC, matching register’s `wr v`.
-  - `wr v` = 2: Loaded from Shared Memory to SRAM twice. With 25 weights, this is low—possibly fetching in small batches (e.g., 12-13 weights), but exact tiling is unclear.
-  - `rd ^` = 0, `wr ^` = 0: No other movement.
-
-- **Shared Memory Level**:
-  - `rd v` = 4: Read 4 times to SRAM. If 25 weights are fetched in chunks (e.g., 6-7 weights), 4 reads could suffice, but `SRAM wr v = 2` suggests a mismatch or optimization not fully captured here.
-
-#### **Operand I (Input)**:
-**Memory Levels**:
-1. Register
-2. Shared Memory for Inputs/Outputs
-
-**Word Accesses**:
-```json
-"I": [
-    { "rd ^": 0, "wr v": 720, "rd v": 3600, "wr ^": 0 },  // Register
-    { "rd ^": 0, "wr v": 0, "rd v": 720, "wr ^": 0 }      // Shared Memory
-]
-```
-
-- **Register Level**:
-  - `rd v` = 3600: Each MAC reads an input from register to operational array.
-  - `wr v` = 720: Inputs loaded from Shared Memory to register 720 times. For each `(ox,oy)`, a 5x5 input window is needed (25 elements), but with overlap. `720 / 144 = 5` loads per output pixel, suggesting each `FY` loop loads one row (5 elements) reused across `FX`.
-  - `rd ^` = 0, `wr ^` = 0: No other movement.
-
-- **Shared Memory Level**:
-  - `rd v` = 720: Matches register’s `wr v`, supplying 720 input loads.
-  - Others = 0: Inputs are read-only from here.
-
----
-
-### Step 5: Synthesis and Observations
-The word access values reflect:
-- **Register Level**: Direct MAC operations (3600 for all operands), with `O` accumulating partial sums, `W` and `I` fetched per MAC or with reuse (`I` has reuse).
-- **Higher Levels**: Data movement based on tiling and loop ordering. `O` moves 144 outputs to SRAM, then aggregates to Shared Memory. `W` lacks reuse (fetched 3600 times), suggesting a scheduling inefficiency. `I` leverages overlap (720 loads vs. 3600 MACs).
-- **Discrepancies**: `W`’s `rd v = 4` (Shared Memory) vs. `wr v = 2` (SRAM), and `O`’s `rd ^ = 18` (SRAM) vs. `wr ^ = 36` (Shared Memory) suggest possible packing, word size differences, or cost model specifics not detailed here.
-
----
-
-### Conclusion
-The word access values are derived from:
-1. **MAC Operations**: 3600 reads/writes at the register level for `O`, `W`, `I`.
-2. **Loop Ordering**: Determines which memory level supplies data per loop, affecting reuse (e.g., `I` at 720 due to `FY`/`FX` structure).
-3. **Tiling**: `OX` and `OY` tiling (9 tiles of 4x4) influences data transfers to higher memories (e.g., `O`’s 144 to 18 to 36).
-4. **Memory Hierarchy**: Data flows from Shared Memory → SRAM → Register for `W` and `O`, and Shared Memory → Register for `I`.
-
-For precise reconciliation (e.g., `W`’s 4 vs. 2, `O`’s 18 vs. 36), the ZigZag cost model would clarify assumptions about data packing or transfer granularity. Without it, the values align with a per-MAC access pattern adjusted by tiling and minimal reuse for this schedule. If you can provide the cost model, I can refine this further!
-
-*The discrepency in the answer is due to the change in the bandwidth from the Shared_memory to SRAM*
-"# Understanding ZigZag's Word Access Calculation
-
-## 1. Purpose of ZigZag
-ZigZag is a framework for exploring the design space of hardware architectures and mapping strategies for deep learning accelerators. It helps optimize how neural network computations are mapped to hardware by analyzing computation patterns, data movements, and memory access costs.
-
-## 2. Supporting Libraries and Components
-ZigZag consists of several Python modules that work together:
-- `classes/cost_model/` - Contains the cost modeling logic
-- `classes/workload/` - Defines the neural network workloads
-- `classes/hardware/` - Describes hardware architectures
-- `classes/mapping/` - Handles mapping of computations to hardware
-- `classes/opt/` - Optimization algorithms
-
-## 3. Word Access Calculation in ZigZag
-
-### Core Files that Determine Word Access Calculation
-
-```python name=relevant_files.py
-# Key files involved in word access calculation:
-# 1. zigzag/classes/cost_model/memory_word_access.py - Core word access calculation
-# 2. zigzag/classes/cost_model/cost_model.py - Coordinates cost modeling
-# 3. zigzag/classes/hardware/architecture.py - Hardware memory hierarchy definition
-# 4. zigzag/classes/mapping/temporal_mapping.py - Defines loop ordering
-```
-
-### How Word Access is Calculated
-
-The word access calculation in ZigZag happens in several steps:
-
-#### 1. Memory Hierarchy Analysis
-
-The memory hierarchy for each operand (I, W, O) is defined in your hardware configuration. For your case:
-- **Output (O)**: Register → SRAM → Shared Memory
-- **Weights (W)**: Register → SRAM → Shared Memory
-- **Input (I)**: Register → Shared Memory
-
-#### 2. Loop Analysis
-
-ZigZag analyzes the nested loop structure (OX_tile, OY_tile, OX, OY, FY, FX, K) to determine:
-- Which loops access which operands
-- Which memory level each loop gets data from
-- How data is reused across loop iterations
-
-#### 3. Word Access Counting
-
-For each operand at each memory level, ZigZag tracks four types of accesses:
-- `rd ^`: Read data from current level to send to a higher level
-- `wr v`: Write data to current level from a higher level
-- `rd v`: Read data from current level to send to a lower level
-- `wr ^`: Write data to current level from a lower level
-
-#### 4. Memory Level Translation and Packing
-
-The discrepancies you're seeing (like W's 4 vs 2, and O's 18 vs 36) are likely related to how ZigZag handles data packing between memory levels. 
-
-When memory levels have different widths, ZigZag calculates "packing factors" - how many logical words fit in one physical memory word. This affects the count of memory transactions.
-
-### Where This Happens in the Code
-
-The calculation takes place primarily in these functions:
-
-```python name=memory_word_access.py
-# In zigzag/classes/cost_model/memory_word_access.py (or similar)
-
-def calculate_memory_word_access(layer_node, spatial_mapping, temporal_mapping, architectural_state):
+def calc_memory_word_access(mapping, accelerator):
     """
-    This calculates all memory word accesses for each operand at each memory level
+    Returns: dict[layer_op] → list[ dict[DataDirection → accesses] ]
     """
-    # Initialize memory word access counts
-    mem_word_access = initialize_mem_word_access()
-    
-    # Process each temporal loop
-    for loop_id, loop_dim in enumerate(temporal_mapping.loop_order):
-        for operand in ['I', 'W', 'O']:
-            # Find which memory level this loop accesses
-            mem_level = find_mem_level_for_loop(operand, loop_id, architectural_state)
-            
-            # Calculate data reuse for this loop
-            data_reuse = calculate_data_reuse(operand, loop_dim, layer_node)
-            
-            # Update word access counts based on loop and reuse
-            update_word_access(mem_word_access, operand, mem_level, loop_dim, data_reuse)
-    
-    # Apply memory level translations (this causes your discrepancies)
-    apply_memory_hierarchy_translations(mem_word_access, architectural_state)
-    
-    return mem_word_access
+    mem_access = {}
 
-def apply_memory_hierarchy_translations(mem_word_access, architectural_state):
-    """
-    This function applies translations between memory levels, accounting for
-    memory width differences (packing factors)
-    """
-    for operand in ['I', 'W', 'O']:
-        for level in range(1, len(architectural_state.memory_hierarchy[operand])):
-            # Calculate packing factor between levels
-            packing_factor = calculate_packing_factor(
-                architectural_state, operand, level-1, level
-            )
-            
-            # Apply packing factor to access counts
-            # This is where W's 4 vs 2 and O's 18 vs 36 differences occur
-            if packing_factor != 1:
-                # The lower (level-1) memory's "rd ^" gets divided by packing_factor
-                # to get the higher (level) memory's "wr v"
-                mem_word_access[operand][level]['wr v'] = math.ceil(
-                    mem_word_access[operand][level-1]['rd ^'] / packing_factor
-                )
+    for layer_op in mapping.layer.layer_operands:
+        # Map the layer operand (I, W, or O) to its MemoryOperand
+        mem_op = mapping.layer.memory_operand_links.layer_to_mem_op(layer_op)
+        mem_access[layer_op] = []
+
+        # For each memory level this operand resides in…
+        for lvl in range(mapping.mem_level[layer_op]):
+            ml = accelerator.get_memory_level(mem_op, lvl)
+            # Number of spatial replicas at this level
+            unit_count = mapping.spatial_mapping.unit_count[layer_op][lvl + 1]
+            dm = mapping.unit_mem_data_movement[layer_op][lvl]
+
+            # Pull out the three key attributes (dicts keyed by DataDirection)
+            amt_per_period = dm.get_attribute(DataMoveAttr.DATA_TRANS_AMOUNT_PER_PERIOD)
+            precision     = dm.get_attribute(DataMoveAttr.DATA_PRECISION)
+            period_count  = dm.get_attribute(DataMoveAttr.DATA_TRANS_PERIOD_COUNT)
+
+            accesses = {}
+            # Compute accesses **per** direction
+            for dirn in DataDirection:
+                a  = amt_per_period.get(dirn, 0)
+                p  = precision    .get(dirn, 0)
+                pc = period_count .get(dirn, 0)
+                max_bw = ml.get_max_bandwidth(mem_op, dirn)
+                min_bw = ml.get_min_bandwidth(mem_op, dirn)
+
+                if a == 0 or p == 0:
+                    accesses[dirn] = 0
+                else:
+                    # 1) how many worst-case blocks?
+                    blocks = ceil((a * p) / min_bw)
+                    # 2) normalize for peak BW, expand by #periods & #replicas
+                    accesses[dirn] = blocks * (min_bw / max_bw) * pc * unit_count
+
+            mem_access[layer_op].append(accesses)
+
+    return mem_access
 ```
 
-### Specific Answer to Your Question
+1. **Loop over operands & levels**
+   For each of Input, Weight, Output (and for each memory‐level it was assigned), we’ll compute four directional counters:
 
-The discrepancies you're seeing in the word access values:
+   * `RD_OUT_TO_HIGH`
+   * `WR_IN_BY_HIGH`
+   * `RD_OUT_TO_LOW`
+   * `WR_IN_BY_LOW`
 
-1. **For W (Weight) discrepancy (4 vs 2)**:
-   - This happens in `apply_memory_hierarchy_translations` where the packing factor between Shared Memory and SRAM is calculated.
-   - ZigZag is determining that 4 read operations from Shared Memory can pack into 2 write operations to SRAM, likely because SRAM has a wider memory width than Shared Memory for weights.
+2. **Fetch data‐movement stats**
+   From `mapping.unit_mem_data_movement[layer_op][lvl]` we read:
 
-2. **For O (Output) discrepancy (18 vs 36)**:
-   - Similarly, the 36 write operations to Shared Memory from SRAM are translated to 18 read operations from SRAM because of memory width differences.
-   - ZigZag is calculating that each SRAM read can contain data for 2 Shared Memory writes.
+   * **`DATA_TRANS_AMOUNT_PER_PERIOD`** (elements per period)
+   * **`DATA_PRECISION`** (bits per element)
+   * **`DATA_TRANS_PERIOD_COUNT`** (# of periods)
 
-The core of this calculation happens in ZigZag's memory word access module, where it applies packing factors based on the memory hierarchy configuration in your hardware description.
+3. **Bandwidth bounds**
+   From the accelerator’s `MemoryLevel` we get:
 
-If you want to examine this directly, look for files named `memory_word_access.py` or similar in the `classes/cost_model/` directory of your ZigZag installation."
+   * `min_bw`: the minimum sustained words-per-cycle (worst case)
+   * `max_bw`: the peak words-per-cycle
+
+4. **Block count**
+
+   $$
+     \text{blocks} = \Bigl\lceil\frac{\text{amount}\times\text{precision}}{\min\_bw}\Bigr\rceil
+   $$
+
+5. **Normalize & scale**
+
+   $$
+     \text{accesses} 
+       = \text{blocks}
+         \;\times\;\frac{\min\_bw}{\max\_bw}
+         \;\times\;\text{period\_count}
+         \;\times\;\text{unit\_count}
+   $$
+
+6. **Zero‐filter**
+   If either the amount or the precision is zero, we skip the math and record 0 accesses.
 
 
-*Conclusion* - The above discription is from running a simple worklood like I(16,16,1), W(5,5,1), O(12,12,1). Where the Produced map is as follows
 
-```txt
-Loop ordering for layer_2
-======================================================================================================================================
-Temporal Loops                     O                                W                                I                                
-======================================================================================================================================
-for IX in [0, 4):                  sram                             sram                             shared_memory_inputs_outputs     
---------------------------------------------------------------------------------------------------------------------------------------
-  for IX in [0, 4):                sram                             sram                             shared_memory_inputs_outputs     
---------------------------------------------------------------------------------------------------------------------------------------
-    for IY in [0, 4):              sram                             sram                             shared_memory_inputs_outputs     
---------------------------------------------------------------------------------------------------------------------------------------
-      for IY in [0, 4):            sram                             sram                             register                         
---------------------------------------------------------------------------------------------------------------------------------------
-        for FY in [0, 5):          sram                             sram                             register                         
---------------------------------------------------------------------------------------------------------------------------------------
-          for FX in [0, 5):        sram                             sram                             register                         
---------------------------------------------------------------------------------------------------------------------------------------
-======================================================================================================================================
-Spatial Loops                                                                                                                         
-======================================================================================================================================
-            parfor K in [0, 1):                                                                                                       
---------------------------------------------------------------------------------------------------------------------------------------
+### What “period” means in the formula
 
-```
+In ZigZag a **period** is *one complete life-time of the tile that lives in a given memory level*.
 
-The stats are as follows
-```json
-{
-    "outputs": {
-        "memory": {
-            "utilization": {
-                "O": [
-                    0.75,
-                    0.025177001953125,
-                    0.00025177001953125
-                ],
-                "W": [
-                    0.75,
-                    0.025177001953125,
-                    5.9604644775390625e-06
-                ],
-                "I": [
-                    0.75,
-                    0.00025177001953125
-                ]
-            },
-            "word_accesses": {
-                "O": [
-                    {
-                        "rd ^": 6400,
-                        "wr v": 6400,
-                        "rd v": 6400,
-                        "wr ^": 6400
-                    },
-                    {
-                        "rd ^": 50,
-                        "wr v": 0,
-                        "rd v": 6400,
-                        "wr ^": 6400
-                    },
-                    {
-                        "rd ^": 0,
-                        "wr v": 0,
-                        "rd v": 0,
-                        "wr ^": 100
-                    }
-                ],
-                "W": [
-                    {
-                        "rd ^": 0,
-                        "wr v": 6400,
-                        "rd v": 6400,
-                        "wr ^": 0
-                    },
-                    {
-                        "rd ^": 0,
-                        "wr v": 2,
-                        "rd v": 6400,
-                        "wr ^": 0
-                    },
-                    {
-                        "rd ^": 0,
-                        "wr v": 0,
-                        "rd v": 4,
-                        "wr ^": 0
-                    }
-                ],
-                "I": [
-                    {
-                        "rd ^": 0,
-                        "wr v": 64,
-                        "rd v": 256,
-                        "wr ^": 0
-                    },
-                    {
-                        "rd ^": 0,
-                        "wr v": 0,
-                        "rd v": 64,
-                        "wr ^": 0
-                    }
-                ]
-            }
-        },
-        "energy": {
-            "energy_total": 556998.6,
-            "operational_energy": 256.0,
-            "memory_energy": 556742.6,
-            "memory_energy_breakdown_per_level": {
-                "O": [
-                    2560.0,
-                    149645.0,
-                    200000
-                ],
-                "W": [
-                    1280.0,
-                    67225.6,
-                    8000
-                ],
-                "I": [
-                    32.0,
-                    128000
-                ]
-            },
-            "memory_energy_breakdown_per_level_per_operand": {
-                "O": [
-                    {
-                        "rd ^": 640.0,
-                        "wr v": 640.0,
-                        "rd v": 640.0,
-                        "wr ^": 640.0
-                    },
-                    {
-                        "rd ^": 525.0,
-                        "wr v": 0.0,
-                        "rd v": 67200.0,
-                        "wr ^": 81920.0
-                    },
-                    {
-                        "rd ^": 0,
-                        "wr v": 0,
-                        "rd v": 0,
-                        "wr ^": 200000
-                    }
-                ],
-                "W": [
-                    {
-                        "rd ^": 0.0,
-                        "wr v": 640.0,
-                        "rd v": 640.0,
-                        "wr ^": 0.0
-                    },
-                    {
-                        "rd ^": 0.0,
-                        "wr v": 25.6,
-                        "rd v": 67200.0,
-                        "wr ^": 0.0
-                    },
-                    {
-                        "rd ^": 0,
-                        "wr v": 0,
-                        "rd v": 8000,
-                        "wr ^": 0
-                    }
-                ],
-                "I": [
-                    {
-                        "rd ^": 0.0,
-                        "wr v": 6.4,
-                        "rd v": 25.6,
-                        "wr ^": 0.0
-                    },
-                    {
-                        "rd ^": 0,
-                        "wr v": 0,
-                        "rd v": 128000,
-                        "wr ^": 0
-                    }
-                ]
-            }
-        },
-        "latency": {
-            "data_onloading": 2.0,
-            "computation": 6400.0,
-            "data_offloading": 2.0
-        },
-        "spatial": {
-            "mac_utilization": {
-                "ideal": 0.125,
-                "stalls": 0.125,
-                "stalls_onloading": 0.12496094970321775,
-                "stalls_onloading_offloading": 0.12492192379762648
-            }
-        }
-    },
-    "inputs": {
-        "accelerator": {
-            "id": 0,
-            "name": "Event_Driven_Accelerator",
-            "operational_array": {
-                "operational_unit": {
-                    "energy_cost": 0.04,
-                    "area": 1
-                },
-                "dimensions": {
-                    "D1": 8
-                }
-            },
-            "memory_hierarchy": [
-                "MemoryLevel(instance=register,operands=[I1, I2, O], served_dimensions=set())",
-                "MemoryLevel(instance=sram,operands=[I2, O], served_dimensions={D1})",
-                "MemoryLevel(instance=shared_memory_Weights,operands=[I2], served_dimensions={D1})",
-                "MemoryLevel(instance=shared_memory_inputs_outputs,operands=[I1, O], served_dimensions={D1})"
-            ],
-            "mem_hierarchy_dict": {
-                "I1": [
-                    "MemoryLevel(instance=register,operands=[I1, I2, O], served_dimensions=set())",
-                    "MemoryLevel(instance=shared_memory_inputs_outputs,operands=[I1, O], served_dimensions={D1})"
-                ],
-                "I2": [
-                    "MemoryLevel(instance=register,operands=[I1, I2, O], served_dimensions=set())",
-                    "MemoryLevel(instance=sram,operands=[I2, O], served_dimensions={D1})",
-                    "MemoryLevel(instance=shared_memory_Weights,operands=[I2], served_dimensions={D1})"
-                ],
-                "O": [
-                    "MemoryLevel(instance=register,operands=[I1, I2, O], served_dimensions=set())",
-                    "MemoryLevel(instance=sram,operands=[I2, O], served_dimensions={D1})",
-                    "MemoryLevel(instance=shared_memory_inputs_outputs,operands=[I1, O], served_dimensions={D1})"
-                ]
-            },
-            "dataflows": null,
-            "mem_size_dict": {
-                "I1": [
-                    64,
-                    33554432
-                ],
-                "I2": [
-                    64,
-                    262144,
-                    33554432
-                ],
-                "O": [
-                    64,
-                    262144,
-                    33554432
-                ]
-            },
-            "mem_r_bw_dict": {
-                "I1": [
-                    128,
-                    64
-                ],
-                "I2": [
-                    128,
-                    128,
-                    64
-                ],
-                "O": [
-                    128,
-                    128,
-                    64
-                ]
-            },
-            "mem_w_bw_dict": {
-                "I1": [
-                    128,
-                    64
-                ],
-                "I2": [
-                    128,
-                    128,
-                    64
-                ],
-                "O": [
-                    128,
-                    128,
-                    64
-                ]
-            },
-            "mem_r_bw_min_dict": {
-                "I1": [
-                    128,
-                    64
-                ],
-                "I2": [
-                    128,
-                    128,
-                    64
-                ],
-                "O": [
-                    128,
-                    128,
-                    64
-                ]
-            },
-            "mem_w_bw_min_dict": {
-                "I1": [
-                    128,
-                    64
-                ],
-                "I2": [
-                    128,
-                    128,
-                    64
-                ],
-                "O": [
-                    128,
-                    128,
-                    64
-                ]
-            },
-            "mem_sharing_list": [
-                {
-                    "I1": 0,
-                    "I2": 0,
-                    "O": 0
-                },
-                {
-                    "I1": 1,
-                    "O": 2
-                },
-                {
-                    "I2": 1,
-                    "O": 1
-                }
-            ]
-        },
-        "layer": {
-            "name": "layer_2",
-            "type": "Conv",
-            "equation": "O[b][k][oy][ox] = W[k][c][fy][fx] * I[b][c][iy][ix]",
-            "equation_relations": [
-                "OX = 1*IX + 1*FX",
-                "OY = 1*IY + 1*FY"
-            ],
-            "loop_dimensions": {
-                "B": 1,
-                "K": 1,
-                "C": 1,
-                "IY": 16,
-                "IX": 16,
-                "FY": 5,
-                "FX": 5
-            },
-            "operand_precision": {
-                "W": 8,
-                "I": 8,
-                "O": 8,
-                "O_final": 16
-            },
-            "user_spatial_mapping": {
-                "D1": {
-                    "K": 1
-                }
-            },
-            "memory_operand_links": {
-                "O": "O",
-                "W": "I2",
-                "I": "I1"
-            }
-        },
-        "spatial_mapping": {
-            "O": [
-                [],
-                [
-                    "(K, 1)"
-                ],
-                [],
-                []
-            ],
-            "W": [
-                [],
-                [
-                    "(K, 1)"
-                ],
-                [],
-                []
-            ],
-            "I": [
-                [],
-                [
-                    "(K, 1)"
-                ],
-                []
-            ]
-        },
-        "temporal_mapping": {
-            "O": [
-                [],
-                [
-                    "(FX, 5)",
-                    "(FY, 5)",
-                    "(IY, 4)",
-                    "(IY, 4)",
-                    "(IX, 4)",
-                    "(IX, 4)"
-                ],
-                []
-            ],
-            "W": [
-                [],
-                [
-                    "(FX, 5)",
-                    "(FY, 5)",
-                    "(IY, 4)",
-                    "(IY, 4)",
-                    "(IX, 4)",
-                    "(IX, 4)"
-                ],
-                []
-            ],
-            "I": [
-                [
-                    "(FX, 5)",
-                    "(FY, 5)",
-                    "(IY, 4)"
-                ],
-                [
-                    "(IY, 4)",
-                    "(IX, 4)",
-                    "(IX, 4)"
-                ]
-            ]
-        }
-    }
-}
-```
+* Pick an operand **op** and a memory level **l**.
+  All temporal loops that are **mapped at l or deeper** form the **live tile** (that tile fits in level *l*).
+  The loops that sit **above** level *l*\* iterate over such tiles.
+* When the upper loop indices advance, the tile is evicted and a new one is fetched; the **same data-movement sequence repeats**.
+  Each repetition is what the code calls **one period**.
 
-From the stats and the basic calculations as shown below
-
-1. Total MAC operations: 16*16*5*5 = 6400 -> This is more than the output defined problem  but as we are trying to model the problem in terms of the input this aries and it is fine (Should be solved as we scale the workload)
-2. INput workload: 16*16 = 296
-3. Weight workload: 5*5 = 25
-4. Output workload: 12*12 = 144
-
-Now, The bandwidth of the Shared memory is 64 and that of SRAM is 128 bits. When the bits are transferred from the shared memory to the SRAM they are clubbed and sent out 
+Hence
 
 $$
-\text{accesses} = 
-\left\lceil \frac{\text{data\_elem\_move\_per\_period} \times \text{data\_precision}}{\text{min\_bw}} \right\rceil 
-\times \frac{\text{min\_bw}}{\text{max\_bw}} 
-\times \text{total\_period\_count} 
-\times \text{unit\_count}
+\boxed{\,P^{(op,l)}
+       \;=\;\prod_{t\in\text{outer loops for }(op,l)} T_t\,}
 $$
 
-And due to which initiall the Weights are clubbed as 4 i.e [5*5*8/64 = 3.125 => upper ciel of this is 4] at the Shared memmory and from there they were transferred to the SRAM which has a bandwidth of 128. So, they are clubbed even better and the rd access decrease to 2
+where $T_t$ is the trip-count of temporal loop *t*.
 
-This same phenomemon happens to the outputs also where the initally in SRAM the are written with 50 and when they are changed to Shared memory they are written with 100 blocks
+---
 
-Where as for the inputs the read down is decided by the shared memory tiling that produced the values as shown above. [4*4*4 = 64]
+### Where it is calculated in the code
 
-# Following functions are required
-1. Partial sum generator
+* During mapping analysis `CostModelEvaluation._init_data_movement` walks the temporal loop nest from **outer → inner**.
+* Whenever an operand crosses a memory boundary the routine multiplies the running **`period_factor`** for that operand by the current loop’s range (`rng`).
+* The resulting integer is stored in
 
-Based on your HTML script, I’ve extracted the logic that generates the partial sum contribution table (which shows how each input cell contributes to the output cells in a convolution operation) into a separate JavaScript function. This function, `generateContributionTable`, takes the input size and kernel size as parameters and returns a 2D array where each element is a list of `[i, j]` output positions that the corresponding input cell contributes to. This can be easily integrated into a validator script to check convolution contributions.
-
-Here’s the extracted function:
-
-```javascript
-/**
- * Generates a contribution table for convolution.
- * For each input cell (r, c), lists the output cells [i, j] that it contributes to.
- * 
- * @param {number} inputSize - The size of the input grid (assuming square grid).
- * @param {number} kernelSize - The size of the kernel (assuming square kernel).
- * @returns {Array<Array<Array<[number, number]>>>} A 2D array where each element is a list of [i, j] pairs.
- */
-function generateContributionTable(inputSize, kernelSize) {
-    const outputSize = inputSize - kernelSize + 1;
-    const table = [];
-    for (let r = 0; r < inputSize; r++) {
-        table[r] = [];
-        for (let c = 0; c < inputSize; c++) {
-            table[r][c] = [];
-            const iMin = Math.max(0, r - kernelSize + 1);
-            const iMax = Math.min(outputSize - 1, r);
-            const jMin = Math.max(0, c - kernelSize + 1);
-            const jMax = Math.min(outputSize - 1, c);
-            for (let i = iMin; i <= iMax; i++) {
-                for (let j = jMin; j <= jMax; j++) {
-                    table[r][c].push([i, j]);
-                }
-            }
-        }
-    }
-    return table;
-}
+```python
+DataMovePattern.data_trans_period_count.<dir>
 ```
 
-### How to Use It in a Validator Script
-You can include this function in a separate JavaScript file (e.g., `contributionTable.js`) and use it in your validator script like this:
+and finally passed as `total_period_count` to
 
-```javascript
-// Example validator script
-const contributionTable = generateContributionTable(16, 5);
-
-// Check contributions for a specific input cell, e.g., (r=4, c=4)
-console.log("Contributions from input cell (4,4):", contributionTable[4][4]);
-
-// Validate that an input cell contributes to expected output cells
-const expected = [[0,0], [0,1], [1,0], [1,1]]; // Example expected contributions
-const actual = contributionTable[0][0];
-const isValid = expected.every(([i, j], idx) => 
-    actual[idx] && actual[idx][0] === i && actual[idx][1] === j
-);
-console.log("Validation result:", isValid);
+```python
+_calc_memory_access(..., total_period_count, ...)
 ```
 
-### Explanation
-- **Input Parameters**: `inputSize` (e.g., 16) and `kernelSize` (e.g., 5) define the grid and convolution kernel.
-- **Output Size**: Calculated as `inputSize - kernelSize + 1` (e.g., 16 - 5 + 1 = 12), assuming no padding and stride 1.
-- **Return Value**: A 2D array where `table[r][c]` is an array of `[i, j]` pairs representing output positions in the 12x12 grid that the input cell `(r, c)` contributes to.
-- **Logic**: For each input cell `(r, c)`, it computes the range of output indices `(i, j)` where the 5x5 kernel, when positioned with its top-left at `(i, j)`, overlaps `(r, c)`.
+(see *cost\_model.py*, `_calc_memory_access`, lines \~23 030).
 
-This function is now independent of the DOM and can be reused in any JavaScript environment, such as a validator script, to analyze or verify convolution contributions.
+---
+
+### Quick example with your layer 0 mapping
+
+*For output **O** between Register (L0) and SRAM (L1):*
+
+| loop   | range | placed in L0? | contributes to **P**? |
+| ------ | ----- | ------------- | --------------------- |
+| FX     | 3     | yes           | no                    |
+| FY     | 3     | yes           | no                    |
+| K      | 8     | yes           | no                    |
+| **C**  | 3     | no            | **yes**               |
+| **IY** | 224   | no            | **yes**               |
+| **IX** | 224   | no            | **yes**               |
+
+$$
+P^{(O,\,\text{L0})}=C\cdot IY\cdot IX=3\times224\times224=150\,528
+$$
+
+That is exactly the factor that turns the single-tile transfer of
+$192\;\text{words }\bigl(=K_\text{tile}\times FY\times FX=8\times3\times3\bigr)$
+into the 28 901 376 word “wr v” you see in ZigZag’s JSON:
+
+$$
+192 \;(\text{words/period}) \times 150\,528 \;(\text{periods}) = 28\,901\,376
+$$
+
+---
+
+### One-liner to compute **P** in a stand-alone script
+
+```python
+def period_count(operand: str, level: str, temporal_loops, alias):
+    """Return P^(op,l) given the parsed mapping."""
+    factor = 1
+    level_seen = False
+    for tl in temporal_loops:                       # outer → inner
+        tgt = alias[tl["mapping"][operand]]
+        if tgt == level:
+            level_seen = True
+        elif level_seen:                            # loop sits above <level>
+            rng = tl["range"][1] - tl["range"][0] if isinstance(tl["range"], list) else tl["range"]
+            factor *= rng
+    return factor
+```
+
+Call the function for every *(op,l)* pair and feed the result into the
+formula you showed:
+
+```python
+A_dir = ceil(A_elem * p / BW_min) * (BW_min / BW_max) * P * UC
+```
+
+That reproduces exactly the same period numbers—and therefore the same
+word-access counts—that ZigZag prints.
+
+
+---
+
+# Latency computation
+
+Once the wordaccess is computed then the latency is calucated whichc consists of three different costs i.e Computation cost, Data onloading cost and Data offloading cost.
+
+Here is the explnantion as follows
+
+
+## Formulas
+
+**Extracting formulas**
+
+The user wants me to extract the formulas used for data onloading, data offloading, and computation from the given code.
+
+It looks like data onloading is calculated through functions like `calc_data_loading_latency`, `calc_loading_single_port`, and others. The key formula appears in `calc_onloading_combined` and `calc_offloading_combined`, which both relate to `data_onloading_cycle` and `data_offloading_cycle` in `calc_overall_latency`. I’ll focus on clarifying and extracting those specific formulas to answer the user's request.
+
+**Extracting data onloading formulas**
+
+The user wants the formulas for data onloading.
+
+For a single input operand, it's the sum of the longest loading cycles between `wr_in_by_high` and `rd_out_to_low` across memory levels. For multiple operands, the formula combines shared, half-shared, and individual parts of the operands.
+
+The key formula is:
+For two operands:
+
+$$
+D_{on} = \min\left[
+S_1 + \max(S_2 + H_2 + I_2, H_1 + I_1), S_2 + \max(S_1 + H_1 + I_1, H_2 + I_2)
+\right]
+$$
+
+**Extracting latency formulas**
+
+The user requested formulas for data onloading, offloading, and computation. Based on the code, here are the relevant equations:
+
+1. **Data onloading**:
+
+   * For a single operand:
+
+   $$
+   D_{on} = \sum_{i=0}^{L-2} \max(C^{(i)}_{rd\_out\_to\_high}, C^{(i+1)}_{wr\_in\_by\_low})
+   $$
+
+   * For two operands:
+
+   $$
+   D_{on} = \min\bigl[S_1 + \max(S_2 + H_2 + I_2, H_1 + I_1), S_2 + \max(S_1 + H_1 + I_1, H_2 + I_2)\bigr]
+   $$
+
+2. **Data offloading**:
+
+   $$
+   D_{off} = \sum_{i=0}^{L-2} \max(C^{(i)}_{rd\_out\_to\_high}, C^{(i+1)}_{wr\_in\_by\_low})
+   $$
+
+3. **Computation latency**:
+
+   $$
+   L_{comp} = \lceil \frac{T_{MAC}}{N_{PE}} \rceil \cdot c + S
+   $$
+
+Where:
+
+* \$T\_{MAC}\$ = total MAC count
+* \$N\_{PE}\$ = total unit count
+* \$c\$ = cycles per operation
+* \$S\$ = stall slack
+
+
+Thought for 23 seconds
+
+
+Here are the three core latency formulas, expressed exactly as they’re computed in ZigZag’s `CostModelEvaluation`:
+
+---
+
+### 1. Computation Latency $L_{\text{comp}}$
+
+Let
+
+* $N_{\text{MAC}}$ = total MAC operations (`layer.total_mac_count`)
+* $N_{\text{PE}}$ = number of PEs in the array (`accelerator.operational_array.total_unit_count`)
+* $c$ = cycles per MAC (`cycles_per_op`, usually 1)
+* $T_{\text{temp}}$ = length of your temporal schedule (`mapping_int.temporal_mapping.total_cycle`)
+* $S$ = stall/slack combined across all memory ports (computed via the merged PortActivity logic)
+
+Then ZigZag does:
+
+$$
+\begin{aligned}
+T_{\text{ideal}} &= \Bigl\lceil \tfrac{N_{\text{MAC}}}{N_{\text{PE}}}\Bigr\rceil \times c, \\[6pt]
+L_{\text{comp}}
+&= T_{\text{temp}}\times c \;+\; S.
+\end{aligned}
+$$
+
+In code:
+
+```python
+ideal_temporal_cycle = mapping_int.temporal_mapping.total_cycle * cycles_per_op
+stall_slack_comb   = …   # from combine_data_transfer_rate_per_physical_port()
+L_comp = ideal_temporal_cycle + stall_slack_comb
+```
+
+---
+
+### 2. Data-Onloading Latency $D_{\text{on}}$
+
+For **each** input operand $op$ and **each** pair of adjacent memory levels $\ell$ and $\ell+1$:
+
+1. Compute
+
+   $$
+     C^{(wr)}_{op,\ell}
+     = \Bigl\lceil \frac{d^{(wr)}_{op,\ell}\,\times\,p^{(wr)}_{op,\ell}}{bw^{(wr)}_{op,\ell}}\Bigr\rceil,
+     \quad
+     C^{(rd)}_{op,\ell+1}
+     = \Bigl\lceil \frac{d^{(rd)}_{op,\ell+1}\,\times\,p^{(rd)}_{op,\ell+1}}{bw^{(rd)}_{op,\ell+1}}\Bigr\rceil
+   $$
+
+   where
+
+   * $d$ = `data_trans_amount_per_period`
+   * $p$ = `data_precision`
+   * $bw$ = actual port bandwidth (use read- or write-bw as appropriate)
+2. Form the pair-latency
+
+   $$
+     L_{op,\ell} = \max\bigl(C^{(wr)}_{op,\ell},\,C^{(rd)}_{op,\ell+1}\bigr).
+   $$
+3. Partition all those $L_{op,\ell}$ into
+
+   * fully-shared sum $S_{op}$
+   * half-shared sum $H_{op}$
+   * individual sum $I_{op}$
+     (based on the port-sharing flags)
+
+Then:
+
+* **If** there is only one input operand $op$,
+
+  $$
+    D_{\text{on}} = I_{op}.
+  $$
+* **If** there are exactly two inputs $\{op_1,op_2\}$,
+
+  $$
+    D_{\text{on}}
+    = \min\Bigl[
+      S_{1} + \max\bigl(S_{2}+H_{2}+I_{2},\;H_{1}+I_{1}\bigr),
+      \quad
+      S_{2} + \max\bigl(S_{1}+H_{1}+I_{1},\;H_{2}+I_{2}\bigr)
+    \Bigr].
+  $$
+
+<sub>*This exactly mirrors `calc_onloading_combined()` in the code.*</sub>
+
+---
+
+### 3. Data-Offloading Latency $D_{\text{off}}$
+
+For the **single** output operand and levels $\ell=0,\dots,M{-}2$:
+
+1. Compute the same pair-latencies
+
+   $$
+     C^{(rd)}_{\ell} = \bigl\lceil\tfrac{d^{(rd)}_{\ell}\,p^{(rd)}_{\ell}}{bw^{(rd)}_{\ell}}\bigr\rceil,
+     \quad
+     C^{(wr)}_{\ell+1} = \bigl\lceil\tfrac{d^{(wr)}_{\ell+1}\,p^{(wr)}_{\ell+1}}{bw^{(wr)}_{\ell+1}}\bigr\rceil.
+   $$
+2. $$
+     L_{\text{off},\ell} = \max\bigl(C^{(rd)}_{\ell},\,C^{(wr)}_{\ell+1}\bigr).
+   $$
+3. Sum them up:
+
+   $$
+     D_{\text{off}} = \sum_{\ell=0}^{M-2} L_{\text{off},\ell}.
+   $$
+
+<sub>*This is exactly what `calc_offloading_combined()` does.*</sub>
+
+---
+
+Finally, the three end-to-end latencies reported are:
+
+$$
+\begin{aligned}
+L_0 &= L_{\text{comp}},\\
+L_1 &= L_0 + D_{\text{on}},\\
+L_2 &= L_1 + D_{\text{off}}.
+\end{aligned}
+$$
+
+
+## Algorithm
+
+**Latency Calculation Algorithm**
+
+```python
+def calc_total_latency(mapping, accelerator, cycles_per_mac=1):
+    """
+    Given:
+      - mapping: a Mapping object (with .unit_mem_data_movement, .mem_level, .spatial_mapping.unit_count,
+                 .temporal_mapping.total_cycle, etc.)
+      - accelerator: describes MemoryLevels, MemoryPorts, and the OperationalArray
+      - cycles_per_mac: how many cycles each MAC takes (usually 1)
+    Returns:
+      (latency_without_io, latency_with_load, latency_with_load_and_store)
+    """
+
+    # 1. Determine which levels can double-buffer
+    double_buffer = {}
+    for op in mapping.layer.layer_operands:
+        double_buffer[op] = [False]
+        for lvl in range(mapping.mem_level[op]):
+            util_shared = mapping.effective_mem_utili_shared[op][lvl]
+            util_indiv  = mapping.effective_mem_utili_individual[op][lvl]
+            # if <50% used, or individual slack, enable double buffering
+            double_buffer[op].append(util_shared <= 0.5 or util_indiv <= 1 - util_shared)
+
+    # 2. For each operand & level, compute:
+    #    - allowed_cycles[op][lvl]  = from DATA_TRANS_PERIOD or INST_DATA_TRANS_WINDOW
+    #    - real_cycles[op][lvl]     = ceil(data_bits / bw)
+    allowed = {}   # MemoryAccesses per (op,lvl)
+    real     = {}   # MemoryAccesses per (op,lvl)
+    for op in mapping.layer.layer_operands:
+      allowed[op], real[op] = [], []
+      for lvl in range(mapping.mem_level[op]):
+        umdm = mapping.unit_mem_data_movement[op][lvl]
+        # select attr based on double_buffer flag
+        win_attr = (DataMoveAttr.DATA_TRANS_PERIOD
+                    if double_buffer[op][lvl] else
+                    DataMoveAttr.INST_DATA_TRANS_WINDOW)
+        win_next = (DataMoveAttr.DATA_TRANS_PERIOD
+                    if double_buffer[op][lvl+1] else
+                    DataMoveAttr.INST_DATA_TRANS_WINDOW)
+
+        allowed_cycles = MemoryAccesses(
+          rd_out_to_low  = umdm.get(win_attr).rd_out_to_low,
+          wr_in_by_low   = umdm.get(win_attr).wr_in_by_low,
+          rd_out_to_high = umdm.get(win_next).rd_out_to_high,
+          wr_in_by_high  = umdm.get(win_next).wr_in_by_high
+        )
+        allowed[op].append(allowed_cycles)
+
+        # real cycles = ceil(bits / bw)
+        real_cycles = MemoryAccesses(
+          rd_out_to_low  = ceil(umdm.amount_per_period.rd_out_to_low  * umdm.precision.rd_out_to_low  / bw_read),
+          wr_in_by_low   = ceil(umdm.amount_per_period.wr_in_by_low   * umdm.precision.wr_in_by_low   / bw_write),
+          rd_out_to_high = ceil(umdm.amount_per_period.rd_out_to_high * umdm.precision.rd_out_to_high / bw_read),
+          wr_in_by_high  = ceil(umdm.amount_per_period.wr_in_by_high  * umdm.precision.wr_in_by_high  / bw_write)
+        )
+        real[op].append(real_cycles)
+
+    # 3. Build per-port PortActivity lists and compute the global stall/slack
+    port_activities = []
+    for mem_lvl in accelerator.memory_hierarchy.mem_level_list:
+      for port in mem_lvl.ports:
+        duties = []
+        for (mem_op, lvl, dirn) in port.served_op_lv_dir:
+          if mapping.layer.memory_operand_links.contains(mem_op):
+            op = mapping.layer.memory_operand_links.mem_to_layer_op(mem_op)
+            P  = allowed[op][lvl].get(dirn)
+            R  = real   [op][lvl].get(dirn)
+            Cc = umdm.period_count.get(dirn)
+            duties.append(PortActivity(real=R, allowed=P, period=umdm.period.get(dirn), period_count=Cc))
+        if duties:
+          port_activities.append((port, duties))
+
+    # combine MUW & stall/slack per port, then take the max across all ports
+    stall_slack_list = []
+    for port, duties in port_activities:
+      if len(duties) == 1:
+        stall_slack_list.append(duties[0].stall_or_slack)
+      else:
+        # union of updating windows minus overlaps + positive slack
+        union = calc_mem_updating_window_union(duties)
+        pos = sum(d.stall_or_slack for d in duties if d.stall_or_slack>0)
+        neg = sum(d.stall_or_slack for d in duties if d.stall_or_slack<0)
+        total_win = sum(d.mem_updating_window for d in duties)
+        stall_slack = pos + max(0, neg + total_win - union)
+        stall_slack_list.append(stall_slack)
+    stall_slack_comb = max(stall_slack_list, default=0)
+
+    # 4. Compute on-loading (initial) cycles & off-loading (final) cycles
+    data_onloading  = calc_data_loading_latency(...)   # combines ports & handles shared/individual cases
+    data_offloading = calc_data_offloading_latency(...)
+
+    # 5. Compute the ideal MAC cycles
+    total_macs = mapping.layer.total_mac_count
+    nPEs       = accelerator.operational_array.total_unit_count
+    ideal_cycle = ceil(total_macs / nPEs) * cycles_per_mac
+
+    # 6. Compute the temporal-mapping cycles (assuming perfect reuse)
+    temp_cycle = mapping.temporal_mapping.total_cycle * cycles_per_mac
+
+    # 7. Assemble the three latency numbers
+    L0 = temp_cycle + stall_slack_comb                   # compute only
+    L1 = L0         + data_onloading                     # + initial data load
+    L2 = L1         + data_offloading                    # + final data store
+
+    return L0, L1, L2
+```
+
+1. **Double-buffer flag**
+   Decide for each operand and memory level whether its data footprint fits in half the buffer (→ can stream next chunk while computing).
+
+2. **Allowed vs. Real**
+
+   * **Allowed:** how many cycles you *can* spend streaming, from your data‐movement window attributes.
+   * **Real:** how many cycles you *must* spend, given actual data size and memory bandwidth.
+
+3. **Port-level Stall/Slack**
+   For each physical port, merge all served‐operand timelines into a single “stall or slack” number. Then assume ports run fully in parallel and take the worst case.
+
+4. **Initial & Final I/O**
+   Combine per‐port loading activities into a single data-onloading cycle count; similarly for offloading.
+
+5. **MAC Compute**
+
+   * **Ideal MAC cycles:** `ceil(total_MACs / #PEs)`
+   * **Temporal mapping cycles:** the schedule length from your temporal mapping.
+
+6. **Total Latencies**
+
+   * **Compute only (L0):** temporal + stall/slack
+   * **+Load (L1):** L0 + data\_onloading
+   * **+Store (L2):** L1 + data\_offloading
+
+## Difference b/w the latency computation b/w the Frame based and Event based computation
+
+
+## 1. ZigZag’s 4-term latency breakdown
+
+ZigZag splits end-to-end latency into four contributions:
+
+1. **Ideal compute cycles**
+
+   $$
+     T_{\rm compute}
+     \;=\;
+     \mathrm{ceil}\Bigl(\tfrac{\text{\# MACs}}{\text{PEs}}\Bigr)
+     \quad\bigl(\equiv \texttt{mapping.temporal\_mapping.total\_cycle}\bigr)
+   $$
+2. **Stall/slack** (due to memory‐port contention)
+3. **Data-onload** (bringing operands in)
+4. **Data-offload** (writing results out)
+
+All four terms are computed by the same ZigZag subroutines (e.g.
+`calc_allowed_and_real_data_transfer_cycle_per_data_transfer_link`,
+`calc_data_loading_latency`, etc.), but the inputs (loop counts,
+`memory_word_access` vectors, etc.) differ.
+
+
+## 2. Frame-based (Eyeriss-style) mapping
+
+* **Spatial loop ordering**: you tile over the entire frame—e.g.
+  batch → output-channels → input-channels → output-Y → output-X.
+* **Data-onload**: you pay once (or once per tile) to stream in
+  all input activations and weights for that tile (through global buffers, NoC, DRAM, …).
+* **Compute**: you then sit in the inner two loops (output-Y, output-X) and churn through MACs, reusing on-chip buffers aggressively.
+* **Data-offload**: you write back all partial-sums (or final outputs) at the end of the tile.
+
+Because big tiles amortize the on- and off-load cost across thousands of MACs, the data-movement terms look like
+
+$$
+  T_{\rm onload}^{\rm frame}
+  \;=\;
+  \sum_{\ell\in\{\text{ifmap, wgt}\}}
+  \mathrm{calc\_data\_loading\_latency}\bigl(\ell,\,\text{tile\_size}\bigr),
+$$
+
+and similarly for $T_{\rm offload}^{\rm frame}$, both proportional to the frame-tile size .
+
+
+## 3. Event-driven (Seneca-style) mapping
+
+1. **Top‐level loop** is “for each incoming event” (rather than “for each output-X,Y”).
+2. **Data-onload** now happens per‐event: every spike brings in a tiny packet (its source address + value) and triggers a micro-kernel.
+
+   * You never preload a whole feature map—only the weights for that one event’s fan-out and the neuron-states you’re updating.
+3. **Compute**: the loop-controller dispatches one microcode that updates exactly those connected PEs (in parallel)—so
+
+   $$
+     T_{\rm compute}^{\rm event}
+     \;=\;
+     \mathrm{ceil}\Bigl(\tfrac{\text{\# fan-out}}{\text{PEs}}\Bigr)
+     \quad\text{cycles per event.}
+   $$
+4. **Data-offload** is just a tiny packet per event (the new spike).
+
+Because every event is self-contained,
+
+$$
+  T_{\rm onload}^{\rm event}
+  \;=\;
+  \sum_{\ell\in\{\text{event‐pkt, wgt, state}\}}
+  \mathrm{calc\_data\_loading\_latency}\bigl(\ell,\,1\text{ event}\bigr),
+$$
+
+and similarly
+
+$$
+  T_{\rm offload}^{\rm event}
+  \;=\;
+  \mathrm{calc\_data\_offloading\_latency}\bigl(\text{1 event}\bigr).
+$$
+
+
+## 4. Putting it all together
+
+| Term              | Frame-based                                | Event-driven                                      |
+| :---------------- | :----------------------------------------- | :------------------------------------------------ |
+| **Ideal compute** | $\lceil\frac{\#MAC_{\rm frame}}{PE}\rceil$ | $\lceil\frac{\#fan\_out}{PE}\rceil$ per event     |
+| **Stall/slack**   | from long data‐stream bursts               | from many small bursts—usually lower              |
+| **Data-onload**   | big bulk loads (activations + weights)     | tiny per-event loads (single spike + its weights) |
+| **Data-offload**  | big bulk writes (partial-sums/out-maps)    | tiny per-event writes (one spike packet)          |
+
+Because event-driven processing never revisits data (no “frame buffer”), its on- and off-load costs per MAC are typically **much lower**—but you pay them **per event** rather than amortized over spatial tiles.  In practice that means:
+
+* **Frame architectures** excel when you have large, dense layers; their $T_{\rm on/offload}$ is small relative to thousands of MACs.
+* **Event-driven** excels when data sparsity (or streaming inputs) means you only ever touch a tiny fraction of the network per event; you avoid hoisting whole tiles.
+
+
+---
+
+# Energy Computation
+
+Let
+
+* $\mathcal{O}$ = set of layer operands (ifmap, weight, psum…)
+* $L$ = number of memory levels (0 = closest to PE, up to highest)
+* $\mathrm{MACs}$ = total number of multiply–accumulates in the layer
+* $\epsilon_{\mathrm{mac}}$ = energy per MAC (from the OperationalArray)
+* For each operand $o$ and level $\ell$, let
+
+  * $R_{\uparrow}(o,\ell)$ = # of “read out to higher level” accesses
+  * $R_{\downarrow}(o,\ell)$ = # of “read out to lower level” accesses
+  * $W_{\uparrow}(o,\ell)$ = # of “write in from higher level” accesses
+  * $W_{\downarrow}(o,\ell)$ = # of “write in from lower level” accesses
+    (all of these come from your `memory_word_access[o][ℓ]` vector)
+* And let
+
+  * $\epsilon_{r}(\ell)$ = energy per read at level $\ell$
+  * $\epsilon_{w}(\ell)$ = energy per write at level $\ell$
+
+Then:
+
+1. **MAC energy**
+
+$$
+E_{\mathrm{mac}}
+\;=\;
+\mathrm{MACs}\;\times\;\epsilon_{\mathrm{mac}}
+$$
+
+2. **Memory energy**
+
+$$
+E_{\mathrm{mem}}
+\;=\;
+\sum_{o\in\mathcal O}\;
+\sum_{\ell=0}^{L-1}\Bigl[\,
+\bigl(R_{\uparrow}(o,\ell)+R_{\downarrow}(o,\ell)\bigr)\,\epsilon_{r}(\ell)
+\;+\;
+\bigl(W_{\uparrow}(o,\ell)+W_{\downarrow}(o,\ell)\bigr)\,\epsilon_{w}(\ell)
+\Bigr]
+$$
+
+3. **Total energy**
+
+$$
+E_{\mathrm{total}}
+\;=\;
+E_{\mathrm{mac}}
+\;+\;
+E_{\mathrm{mem}}
+$$
+
+
+## 2. Algorithm (Pseudocode)
+
+```python
+def calc_total_energy(layer, accelerator, memory_word_access):
+    """
+    layer.total_mac_count         → number of MACs
+    accelerator.operational_array.unit.energy_cost → ε_mac
+    accelerator.memory_hierarchy   → list of MemoryLevel objects ℓ=0…L-1
+    memory_word_access[o][ℓ]       → MemoryAccesses with fields:
+                                     rd_out_to_high, rd_out_to_low,
+                                     wr_in_by_high, wr_in_by_low
+    """
+
+    # 1) MAC energy
+    num_macs   = layer.total_mac_count
+    e_mac      = accelerator.operational_array.unit.energy_cost
+    E_mac      = num_macs * e_mac
+
+    # 2) Memory energy
+    E_mem = 0.0
+    for mem_lvl in accelerator.memory_hierarchy.mem_level_list:
+        lvl = mem_lvl.level_id  # 0,1,…,L-1
+        # per-access energies at this level
+        e_read  = mem_lvl.read_energy
+        e_write = mem_lvl.write_energy
+
+        for op in layer.layer_operands:
+            accesses = memory_word_access[op][lvl]
+            # sum reads + writes in both directions
+            n_reads  = accesses.rd_out_to_high + accesses.rd_out_to_low
+            n_writes = accesses.wr_in_by_high + accesses.wr_in_by_low
+
+            E_mem += n_reads  * e_read
+            E_mem += n_writes * e_write
+
+    # 3) Total
+    E_total = E_mac + E_mem
+    return E_mac, E_mem, E_total
+```
+
+* **`layer.total_mac_count`** and **`ε_mac`** come straight from your compute mapping and the operational-array spec.
+* **`memory_word_access`** is exactly the output of your earlier word-access stage.
+* Each **`MemoryLevel`** carries its own read/write energy costs (`r_cost`, `w_cost` in your YAML).
+
+
+## 3. Difference in the energy the computation b/w the Frame based and the Event based 
+
+
+For an event‐driven core like Seneca, the *shape* of every term in ZigZag’s energy model stays the same, but two things change:
+
+1. **Input‐event and output‐event overhead**
+   You pay a fixed cost for each event “packet” coming in (pre‐processing) and each spike going out (post‐processing). Call these
+
+   $$
+     E_{\text{pre}} \quad\text{and}\quad E_{\text{post}}
+   $$
+
+   (both in pJ per event).
+
+2. **Memory‐access pattern**
+   Frame‐based CNNs stream *all* activations in and out of every level; event‐driven only streams the **single event value** into the RF (no SRAM/GLB hits), plus the weights *needed by that event’s fan‐out* and the neuron‐state updates. In practice that means
+
+   * **Input operand** only incurs register‐file reads (no high‐level SRAM/DRAM hits),
+   * **Weights & partial‐sum (state)** incur the usual multilevel accesses from SRAM down to RF,
+   * **Output operand** is just a small packet out (no frame buffer writes).
+
+
+## A. Modified Energy Formulas
+
+Let:
+
+* $N_e$ = number of input events
+* $\mathrm{MAC}_e$ = MACs *per* event (i.e.\ the event’s fan-out size)
+* $\epsilon_{\mathrm{mac}}$ = MAC energy per op
+* $\mathcal O = \{\text{I},\,\text{W},\,\text{O}\}$ the three operands
+* $\ell=0$…$L-1$ the memory levels (0 = RF, up to highest SRAM/NoC)
+* From ZigZag’s `memory_word_access_ev[o][ℓ]`, let
+
+  $$
+    R_\uparrow(o,\ell),\;R_\downarrow(o,\ell),\;
+    W_\uparrow(o,\ell),\;W_\downarrow(o,\ell)
+  $$
+
+  be the four directional counts *per event*
+* $\epsilon_r(\ell),\;\epsilon_w(\ell)$ = read/write energy at level $\ell$
+
+Then **per event**:
+
+1. **MAC energy**
+
+   $$
+     E_{\rm mac}^{(e)}
+     = \mathrm{MAC}_e \;\times\;\epsilon_{\rm mac}
+   $$
+
+2. **Memory energy**
+
+   $$
+     E_{\rm mem}^{(e)}
+     = \sum_{o\in\{\!\text{W},\text{O}\}}\,
+       \sum_{\ell=0}^{L-1}
+       \Bigl[
+         \bigl(R_\uparrow+R_\downarrow\bigr)(o,\ell)\,\epsilon_r(\ell)
+         \;+\;
+         \bigl(W_\uparrow+W_\downarrow\bigr)(o,\ell)\,\epsilon_w(\ell)
+       \Bigr]
+   $$
+
+   *(note: input “I” only uses RF reads, so all SRAM‐level terms for I drop out)*
+
+3. **Event‐I/O overhead**
+
+   $$
+     E_{\rm io}^{(e)}
+     = E_{\rm pre} \;+\; E_{\rm post}
+   $$
+
+4. **Total per‐event**
+
+   $$
+     E_{\rm event}
+     = E_{\rm pre}
+       \;+\;
+       E_{\rm mac}^{(e)}
+       \;+\;
+       E_{\rm mem}^{(e)}
+       \;+\;
+       E_{\rm post}
+   $$
+
+5. **Aggregate** over all $N_e$ events:
+
+   $$
+     E_{\rm total}
+     = N_e \;\times\; E_{\rm event}
+   $$
+
+## B. Comparison with Frame‐Based
+
+| Term                                               | Frame‐Based                                         | Event‐Driven                                                      |
+| -------------------------------------------------- | --------------------------------------------------- | ----------------------------------------------------------------- |
+| **MAC**                                            | $\#\text{MAC}_{\rm frame}\times \epsilon_{\rm mac}$ |                                                                   |
+| $\mathrm{MAC}_e\times\epsilon_{\rm mac}$ per event |                                                     |                                                                   |
+| **Memory**                                         | $\sum_{o\in\{I,W,O\}}\sum_\ell (\!R+W\!)\epsilon$   | $\sum_{o\in\{W,O\}}\sum_\ell (\!R+W\!)\epsilon$ per event         |
+| **I/O**                                            | frame‐tile preload + write‐back costs               | $E_{\rm pre}+E_{\rm post}$ *per event*                            |
+| **Total**                                          | one big $E_{\rm mac}+E_{\rm mem}$                   | $N_e\bigl(E_{\rm pre}+E_{\rm mac}+E_{\rm mem}+E_{\rm post}\bigr)$ |
+
+
+## C. Script‐Ready Pseudocode
+
+```python
+def calc_event_energy(
+    N_events, mac_per_event, mem_access_ev,
+    accel, E_pre, E_post
+):
+    # mac_per_event: #MACs per incoming event (fan‐out)
+    # mem_access_ev[o][lvl]: (R↑,R↓,W↑,W↓) per event for weights & psum
+    # accel.memory_hierarchy.mem_level_list: levels ℓ
+    # each level ℓ has .read_energy, .write_energy
+
+    # 1) Fixed per-event overhead
+    E_io = E_pre + E_post
+
+    # 2) MAC energy per event
+    eps_mac = accel.operational_array.unit.energy_cost
+    E_mac_ev = mac_per_event * eps_mac
+
+    # 3) Memory energy per event
+    E_mem_ev = 0.0
+    for lvl, mem in enumerate(accel.memory_hierarchy.mem_level_list):
+        e_r = mem.read_energy
+        e_w = mem.write_energy
+        for op in ["W","O"]:                     # only W & psum
+            R_up, R_down, W_up, W_down = mem_access_ev[op][lvl]
+            E_mem_ev += (R_up+R_down)*e_r + (W_up+W_down)*e_w
+
+    # 4) Total per event
+    E_event = E_io + E_mac_ev + E_mem_ev
+
+    # 5) Aggregate
+    E_total = N_events * E_event
+    return E_total
+```
+
+
+

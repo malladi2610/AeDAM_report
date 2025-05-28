@@ -1,5 +1,7 @@
 # Introduction
 
+# [This is perfected and already present in the overleaf]
+
 Developing a workload mapping exploration tool for Event driven accelerators. (AeDAM: An event Driven Mapping Exploration tool) [DSE of the Event driven accelerators]
 
 

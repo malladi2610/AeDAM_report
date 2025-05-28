@@ -836,3 +836,10 @@ To revisit your task again:
 
 Provide a complete notes of how the map space generation, map space search and cost evaluation block are working in the explortion tool to get the best map and how this entire process work with an example(The one I shared)
 
+
+---
+
+# Start from here
+
+This section is similar to the presentation and will only explain the spatial temporal mapping and different dataflows in details and  their advantages and disadvantages, also the frame based and the event based architectures.
+

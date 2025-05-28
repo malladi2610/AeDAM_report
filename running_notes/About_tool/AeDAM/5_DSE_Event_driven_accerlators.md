@@ -432,4 +432,720 @@ Now can you perform a deep research and from the litrature find/show what I am d
 
 In the end of the research you will be answering my research question and also providing support to my research I am performing.
 
+## Answer 2:
+
+Here is the answer from the Gemini and Chatgpt: https://docs.google.com/document/d/1vC0WFAnhy9yVUh4YbdpWcfONLXasZ35qCyc_xVidwUU/edit?usp=sharing
+
+=======================================================================================================================================================
+
+# Exploring the effects of the SRAM and MRAM with constant PEs
+
+## Steps:
+
+1. Development of the Excel sheet with various configuration for exploring the effects
+
+### Question 1:
+
+The DSE of an event driven accelerator needs to be performed to observer the effect of the varying the SRAM parameters as shown below
+
+"name: Event_Driven_Accelerator
+
+operational_array:
+  unit_energy: 0.04  # for ANN MAC operations
+  unit_area: 1
+  dimensions: [D1]
+  sizes: [8]  # 8 NPEs
+
+memories:
+  register:
+    size: 64  # words, e.g., 64x16b for NPE register files
+    r_bw: 128  # high bandwidth for fast access
+    w_bw: 128
+    r_cost: 0.1  # low energy cost, e.g., 8-12 pJ
+    w_cost: 0.1
+    area: 0.01  # small area per instance
+    r_port: 4
+    w_port: 3
+    rw_port: 0
+    latency: 1  # <1 ns (Has to been an integer as per zigzag modelling, So 1ns)
+    operands: [I1,I2,O]
+    ports:
+      - tl: r_port_1
+        fh: w_port_1
+      - tl: r_port_2
+        fh: w_port_2
+      - th: r_port_3
+        fh: w_port_3
+        tl: r_port_4
+    served_dimensions: []
+
+  sram:
+    size: 262144  # 256 KB, e.g., 2 Mb Data Memory
+    r_bw: 128
+    w_bw: 128
+    r_cost: 10.5  # medium energy cost, e.g., 180-220 pJ
+    w_cost: 12.8
+    area: 1
+    r_port: 3
+    w_port: 3
+    rw_port: 0
+    latency: 2  # 2 ns
+    operands: [I2, O]
+    ports:
+        - tl: r_port_1
+          fh: w_port_1
+        - fh: w_port_2
+          tl: r_port_2
+          fl: w_port_3
+          th: r_port_3
+    served_dimensions: [D1]
+
+  shared_memory_Weights:
+    size: 33554432  # 32 MB, e.g., for STT-MRAM
+    r_bw: 64  # lower bandwidth
+    w_bw: 64
+    r_cost: 2000  # high energy cost, e.g., 2000 pJ
+    w_cost: 2000
+    area: 2
+    r_port: 1
+    w_port: 0
+    rw_port: 0
+    latency: 10  # higher latency, e.g., 2x SRAM
+    operands: [I2]
+    ports:
+      - tl: r_port_1
+    served_dimensions: [D1]
+
+  NOC_inputs_outputs:
+    size: 33554432  # 32 MB, e.g., for STT-MRAM
+    r_bw: 64  # lower bandwidth
+    w_bw: 64
+    r_cost: 2000  # high energy cost, e.g., 2000 pJ
+    w_cost: 2000
+    area: 2
+    r_port: 2
+    w_port: 1
+    rw_port: 0
+    latency: 10  # higher latency, e.g., 2x SRAM
+    operands: [I1, O]
+    ports:
+      - tl: r_port_1
+      - tl: r_port_2
+        fl: w_port_1
+    served_dimensions: [D1]
+
+"
+
+Here I want you to take the workload as into consideration, which is VGGnet the configuration is as shown below
+
+
+
+# ID Name Type Input Size Output Size Kernel/Stride Loop Sizes Operand Source
+
+# --0 conv1_1 Conv 224x224x3 224x224x64 3x3, s=1 [1, 64, 3, 224, 224, 3, 3] I:0, W:0
+
+# --1 conv1_2 Conv 224x224x64 224x224x64 3x3, s=1 [1, 64, 64, 224, 224, 3, 3] I:0, W:1
+
+# --2 maxpool1 Pooling 224x224x64 112x112x64 2x2, s=2 [1, 64, 112, 112, 2, 2] I:1, W:2
+
+# --3 conv2_1 Conv 112x112x64 112x112x128 3x3, s=1 [1, 128, 64, 112, 112, 3, 3] I:2, W:3
+
+# --4 conv2_2 Conv 112x112x128 112x112x128 3x3, s=1 [1, 128, 128, 112, 112, 3, 3] I:3, W:4
+
+# --5 maxpool2 Pooling 112x112x128 56x56x128 2x2, s=2 [1, 128, 56, 56, 2, 2] I:4, W:5
+
+# --6 conv3_1 Conv 56x56x128 56x56x256 3x3, s=1 [1, 256, 128, 56, 56, 3, 3] I:5, W:6
+
+# --7 conv3_2 Conv 56x56x256 56x56x256 3x3, s=1 [1, 256, 256, 56, 56, 3, 3] I:6, W:7
+
+# --8 conv3_3 Conv 56x56x256 56x56x256 3x3, s=1 [1, 256, 256, 56, 56, 3, 3] I:7, W:8
+
+# --9 maxpool3 Pooling 56x56x256 28x28x256 2x2, s=2 [1, 256, 28, 28, 2, 2] I:8, W:9
+
+# --10 conv4_1 Conv 28x28x256 28x28x512 3x3, s=1 [1, 512, 256, 28, 28, 3, 3] I:9, W:10
+
+# --11 conv4_2 Conv 28x28x512 28x28x512 3x3, s=1 [1, 512, 512, 28, 28, 3, 3] I:10, W:11
+
+# --12 conv4_3 Conv 28x28x512 28x28x512 3x3, s=1 [1, 512, 512, 28, 28, 3, 3] I:11, W:12
+
+# --13 maxpool4 Pooling 28x28x512 14x14x512 2x2, s=2 [1, 512, 14, 14, 2, 2] I:12, W:13
+
+# --14 conv5_1 Conv 14x14x512 14x14x512 3x3, s=1 [1, 512, 512, 14, 14, 3, 3] I:13, W:14
+
+# -15 conv5_2 Conv 14x14x512 14x14x512 3x3, s=1 [1, 512, 512, 14, 14, 3, 3] I:14, W:15
+
+# -16 conv5_3 Conv 14x14x512 14x14x512 3x3, s=1 [1, 512, 512, 14, 14, 3, 3] I:15, W:16
+
+# -17 maxpool5 Pooling 14x14x512 7x7x512 2x2, s=2 [1, 512, 7, 7, 2, 2] I:16, W:17
+
+# --18 fc1 Conv 7x7x512 1x1x4096 7x7, global [1, 4096, 512, 1, 1, 7, 7] I:17, W:18
+
+# --19 fc2 Conv 1x1x4096 1x1x4096 1x1, s=1 [1, 4096, 4096, 1, 1, 1, 1] I:18, W:19
+
+# --20 fc3 Conv 1x1x4096 1x1x1000 1x1, s=1 [1, 1000, 4096, 1, 1, 1, 1] I:19, W:20
+
+
+Above is the architecture and the VGGnet model which are being used for the DSE of the given architecture. The observation is specifically being made on what is the effect on the latency, energy and the EDP on varying the SRAM parameters. 
+
+I need your help to vary these parameters in a specific manner than just randomly changing the number one by one. I want the configuration that I test have a specific reason and are worth considering to perform the exploration adn finally having a pareto optimal curve. 
+
+Can you help me in developing a sequence of configuration of the SRAM that I can test on to see it's impact on the performance of the VGGnet model which is being modelled.
+
+
+Here is the google docs explanaing the novely: https://docs.google.com/document/d/1vC0WFAnhy9yVUh4YbdpWcfONLXasZ35qCyc_xVidwUU/edit?usp=sharing
+
+The end conclusion is that, combined study of the Memory and PEs is not that novel, but with proper validation and justification it will be an intresting research.
+
+--------------------------------------------------------------------------------------------------------------------------------------------------
+
+# Steps followed in the DSE of the SRAM
+
+The Architecture, Workload and the mapping constraints are as follows
+
+### Architecture
+
+``` yaml
+name: Event_Driven_Accelerator
+
+operational_array:
+  unit_energy: 0.04  # for ANN MAC operations
+  unit_area: 1
+  dimensions: [D1]
+  sizes: [8]  # 8 NPEs
+
+memories:
+  register:
+    size: 64  #size of each register e.g., 64x16b for NPE register files
+    r_bw: 128  # high bandwidth for fast access
+    w_bw: 128
+    r_cost: 0.1  # low energy cost, e.g., 8-12 pJ
+    w_cost: 0.1
+    area: 0.01  # small area per instance
+    r_port: 4
+    w_port: 3
+    rw_port: 0
+    latency: 1  # <1 ns (Has to been an integer as per zigzag modelling, So 1ns)
+    operands: [I1,I2,O]
+    ports:
+      - tl: r_port_1
+        fh: w_port_1
+      - tl: r_port_2
+        fh: w_port_2
+      - th: r_port_3
+        fh: w_port_3
+        tl: r_port_4
+    served_dimensions: []
+
+  sram:
+    size: 3221225472  #3GB.., 24Gb Data memory # 256 KB, e.g., 2 Mb Data Memory   1048576  # 1 MB, e.g., 8 Mb Data Memory
+    r_bw: 128
+    w_bw: 128
+    r_cost: 10.5  # medium energy cost, e.g., 180-220 pJ
+    w_cost: 12.8
+    area: 1
+    r_port: 3
+    w_port: 3
+    rw_port: 0
+    latency: 2  # 2 ns
+    operands: [I2, O]
+    ports:
+        - tl: r_port_1
+          fh: w_port_1
+        - fh: w_port_2
+          tl: r_port_2
+          fl: w_port_3
+          th: r_port_3
+    served_dimensions: [D1]
+
+  shared_memory_Weights:
+    size: 33554432  # 32 MB, e.g., for STT-MRAM
+    r_bw: 64  # lower bandwidth
+    w_bw: 64
+    r_cost: 2000  # high energy cost, e.g., 2000 pJ
+    w_cost: 2000
+    area: 2
+    r_port: 1
+    w_port: 0
+    rw_port: 0
+    latency: 10  # higher latency, e.g., 2x SRAM
+    operands: [I2]
+    ports:
+      - tl: r_port_1
+    served_dimensions: [D1]
+
+  NOC_inputs_outputs:
+    size: 134217728  # 128 MB, e.g., for STT-MRAM
+    r_bw: 64  # lower bandwidth
+    w_bw: 64
+    r_cost: 2000  # high energy cost, e.g., 2000 pJ
+    w_cost: 2000
+    area: 2
+    r_port: 2
+    w_port: 1
+    rw_port: 0
+    latency: 10  # higher latency, e.g., 2x SRAM
+    operands: [I1, O]
+    ports:
+      - tl: r_port_1
+      - tl: r_port_2
+        fl: w_port_1
+    served_dimensions: [D1]
+```
+
+### Workload
+
+``` yaml
+
+# ID	Name	Type	Input Size	Output Size	Kernel/Stride	Loop Sizes	Operand Source
+# --0	conv1_1	Conv	224x224x3	224x224x64	3x3, s=1	[1, 64, 3, 224, 224, 3, 3]	I:0, W:0
+# --1	conv1_2	Conv	224x224x64	224x224x64	3x3, s=1	[1, 64, 64, 224, 224, 3, 3]	I:0, W:1
+# --2	maxpool1	Pooling	224x224x64	112x112x64	2x2, s=2	[1, 64, 112, 112, 2, 2]	I:1, W:2
+# --3	conv2_1	Conv	112x112x64	112x112x128	3x3, s=1	[1, 128, 64, 112, 112, 3, 3]	I:2, W:3
+# --4	conv2_2	Conv	112x112x128	112x112x128	3x3, s=1	[1, 128, 128, 112, 112, 3, 3]	I:3, W:4
+# --5	maxpool2	Pooling	112x112x128	56x56x128	2x2, s=2	[1, 128, 56, 56, 2, 2]	I:4, W:5
+# --6	conv3_1	Conv	56x56x128	56x56x256	3x3, s=1	[1, 256, 128, 56, 56, 3, 3]	I:5, W:6
+# --7	conv3_2	Conv	56x56x256	56x56x256	3x3, s=1	[1, 256, 256, 56, 56, 3, 3]	I:6, W:7
+# --8	conv3_3	Conv	56x56x256	56x56x256	3x3, s=1	[1, 256, 256, 56, 56, 3, 3]	I:7, W:8
+# --9	maxpool3	Pooling	56x56x256	28x28x256	2x2, s=2	[1, 256, 28, 28, 2, 2]	I:8, W:9
+# --10	conv4_1	Conv	28x28x256	28x28x512	3x3, s=1	[1, 512, 256, 28, 28, 3, 3]	I:9, W:10
+# --11	conv4_2	Conv	28x28x512	28x28x512	3x3, s=1	[1, 512, 512, 28, 28, 3, 3]	I:10, W:11
+# --12	conv4_3	Conv	28x28x512	28x28x512	3x3, s=1	[1, 512, 512, 28, 28, 3, 3]	I:11, W:12
+# --13	maxpool4	Pooling	28x28x512	14x14x512	2x2, s=2	[1, 512, 14, 14, 2, 2]	I:12, W:13
+# --14	conv5_1	Conv	14x14x512	14x14x512	3x3, s=1	[1, 512, 512, 14, 14, 3, 3]	I:13, W:14
+# -15	conv5_2	Conv	14x14x512	14x14x512	3x3, s=1	[1, 512, 512, 14, 14, 3, 3]	I:14, W:15
+# -16	conv5_3	Conv	14x14x512	14x14x512	3x3, s=1	[1, 512, 512, 14, 14, 3, 3]	I:15, W:16
+# -17	maxpool5	Pooling	14x14x512	7x7x512	2x2, s=2	[1, 512, 7, 7, 2, 2]	I:16, W:17
+# --18	fc1	Conv	7x7x512	1x1x4096	7x7, global	[1, 4096, 512, 1, 1, 7, 7]	I:17, W:18
+# --19	fc2	Conv	1x1x4096	1x1x4096	1x1, s=1	[1, 4096, 4096, 1, 1, 1, 1]	I:18, W:19
+# --20	fc3	Conv	1x1x4096	1x1x1000	1x1, s=1	[1, 1000, 4096, 1, 1, 1, 1]	I:19, W:20
+
+- id: 0 # Conv1 Stride 1
+  name: layer_0
+  operator_type: Conv
+  equation: O[b][k][oy][ox]+=W[k][c][fy][fx]*I[b][c][iy][ix]
+  dimension_relations: [ox=1*ix+1*fx, oy=1*iy+1*fy]
+  loop_dims: [B, K, C, IY, IX, FY, FX]
+  loop_sizes: [1, 64, 3, 224, 224, 3, 3]
+  operand_precision:
+    W: 16
+    I: 16
+    O: 16
+    O_final: 16
+  operand_source:
+    I: 0
+    W: 0
+
+
+- id: 1 # Conv1 Stride 1
+  name: layer_1
+  operator_type: Conv
+  equation: O[b][k][oy][ox]+=W[k][c][fy][fx]*I[b][c][iy][ix]
+  dimension_relations: [ox=1*ix+1*fx, oy=1*iy+1*fy]
+  loop_dims: [B, K, C, IY, IX, FY, FX]
+  loop_sizes: [1, 64, 64, 224, 224, 3, 3]
+  operand_precision:
+    W: 16
+    I: 16
+    O: 16
+    O_final: 16
+  operand_source:
+    I: 0
+    W: 1
+
+# - id: 2 # Pool1 #Stride 2
+#   name: pooling_layer_1
+#   operator_type: Pooling
+#   equation: O[b][g][oy][ox]+=W[fy][fx]*I[b][g][iy][ix]
+#   dimension_relations: [ox=2*ix+1*fx, oy=2*iy+1*fy]
+#   loop_dims: [B, G, IY, IX, FY, FX]
+#   loop_sizes: [1, 64, 224, 224, 2, 2]
+#   operand_precision:
+#     W: 16
+#     I: 16
+#     O: 16
+#     O_final: 16
+#   operand_source:
+#     I: 1
+#     W: 2
+
+- id: 2 # Pool1 #Stride 2
+  name: pooling_layer_1
+  operator_type: Pooling
+  equation: O[b][g][oy][ox]+=W[fy][fx]*I[b][g][iy][ix]
+  dimension_relations: [ix=2*ox+1*fx, iy=2*oy+1*fy]
+  loop_dims: [B, G, OY, OX, FY, FX]
+  loop_sizes: [1, 64, 112, 112, 2, 2]
+  operand_precision:
+    W: 16
+    I: 16
+    O: 16
+    O_final: 16
+  operand_source:
+    I: 1
+    W: 2
+
+
+- id: 3 # Conv1 Stride 1
+  name: layer_3
+  operator_type: Conv
+  equation: O[b][k][oy][ox]+=W[k][c][fy][fx]*I[b][c][iy][ix]
+  dimension_relations: [ox=1*ix+1*fx, oy=1*iy+1*fy]
+  loop_dims: [B, K, C, IY, IX, FY, FX]
+  loop_sizes: [1, 128, 64, 112, 112, 3, 3]
+  operand_precision:
+    W: 16
+    I: 16
+    O: 16
+    O_final: 16
+  operand_source:
+    I: 2
+    W: 3
+
+- id: 4 # Conv1 Stride 1
+  name: layer_4
+  operator_type: Conv
+  equation: O[b][k][oy][ox]+=W[k][c][fy][fx]*I[b][c][iy][ix]
+  dimension_relations: [ox=1*ix+1*fx, oy=1*iy+1*fy]
+  loop_dims: [B, K, C, IY, IX, FY, FX]
+  loop_sizes: [1, 128, 128, 112, 112, 3, 3]
+  operand_precision:
+    W: 16
+    I: 16
+    O: 16
+    O_final: 16
+  operand_source:
+    I: 3
+    W: 4
+
+# - id: 5 # Pool1 #Stride 2
+#   name: pooling_layer_2
+#   operator_type: Pooling
+#   equation: O[b][g][oy][ox]+=W[fy][fx]*I[b][g][iy][ix]
+#   dimension_relations: [ox=2*ix+1*fx, oy=2*iy+1*fy]
+#   loop_dims: [B, G, IY, IX, FY, FX]
+#   loop_sizes: [1, 128, 112, 112, 2, 2]
+#   operand_precision:
+#     W: 16
+#     I: 16
+#     O: 16
+#     O_final: 16
+#   operand_source:
+#     I: 4
+#     W: 5
+
+
+- id: 5 # Pool1 #Stride 2
+  name: pooling_layer_2
+  operator_type: Pooling
+  equation: O[b][g][oy][ox]+=W[fy][fx]*I[b][g][iy][ix]
+  dimension_relations: [ix=2*ox+1*fx, iy=2*oy+1*fy]
+  loop_dims: [B, G, OY, OX, FY, FX]
+  loop_sizes: [1, 128, 56, 56, 2, 2]
+  operand_precision:
+    W: 16
+    I: 16
+    O: 16
+    O_final: 16
+  operand_source:
+    I: 4
+    W: 5
+
+- id: 6 # Conv1 Stride 1
+  name: layer_6
+  operator_type: Conv
+  equation: O[b][k][oy][ox]+=W[k][c][fy][fx]*I[b][c][iy][ix]
+  dimension_relations: [ox=1*ix+1*fx, oy=1*iy+1*fy]
+  loop_dims: [B, K, C, IY, IX, FY, FX]
+  loop_sizes: [1, 256, 128, 56, 56, 3, 3]
+  operand_precision:
+    W: 16
+    I: 16
+    O: 16
+    O_final: 16
+  operand_source:
+    I: 5
+    W: 6
+
+- id: 7 # Conv1 Stride 1
+  name: layer_7
+  operator_type: Conv
+  equation: O[b][k][oy][ox]+=W[k][c][fy][fx]*I[b][c][iy][ix]
+  dimension_relations: [ox=1*ix+1*fx, oy=1*iy+1*fy]
+  loop_dims: [B, K, C, IY, IX, FY, FX]
+  loop_sizes: [1, 256, 256, 56, 56, 3, 3]
+  operand_precision:
+    W: 16
+    I: 16
+    O: 16
+    O_final: 16
+  operand_source:
+    I: 6
+    W: 7
+
+- id: 8 # Conv1 Stride 1
+  name: layer_8
+  operator_type: Conv
+  equation: O[b][k][oy][ox]+=W[k][c][fy][fx]*I[b][c][iy][ix]
+  dimension_relations: [ox=1*ix+1*fx, oy=1*iy+1*fy]
+  loop_dims: [B, K, C, IY, IX, FY, FX]
+  loop_sizes: [1, 256, 256, 56, 56, 3, 3]
+  operand_precision:
+    W: 16
+    I: 16
+    O: 16
+    O_final: 16
+  operand_source:
+    I: 7
+    W: 8
+
+# - id: 9 # Pool1 #Stride 2
+#   name: pooling_layer_3
+#   operator_type: Pooling
+#   equation: O[b][g][oy][ox]+=W[fy][fx]*I[b][g][iy][ix]
+#   dimension_relations: [ox=2*ix+1*fx, oy=2*iy+1*fy]
+#   loop_dims: [B, G, IY, IX, FY, FX]
+#   loop_sizes: [1, 256, 56, 56, 2, 2]
+#   operand_precision:
+#     W: 16
+#     I: 16
+#     O: 16
+#     O_final: 16
+#   operand_source:
+#     I: 8
+#     W: 9
+
+
+- id: 9 # Pool1 #Stride 2
+  name: pooling_layer_3
+  operator_type: Pooling
+  equation: O[b][g][oy][ox]+=W[fy][fx]*I[b][g][iy][ix]
+  dimension_relations: [ix=2*ox+1*fx, iy=2*oy+1*fy]
+  loop_dims: [B, G, OY, OX, FY, FX]
+  loop_sizes: [1, 256, 28, 28, 2, 2]
+  operand_precision:
+    W: 16
+    I: 16
+    O: 16
+    O_final: 16
+  operand_source:
+    I: 8
+    W: 9
+
+- id: 10 # Conv1 Stride 1
+  name: layer_10
+  operator_type: Conv
+  equation: O[b][k][oy][ox]+=W[k][c][fy][fx]*I[b][c][iy][ix]
+  dimension_relations: [ox=1*ix+1*fx, oy=1*iy+1*fy]
+  loop_dims: [B, K, C, IY, IX, FY, FX]
+  loop_sizes: [1, 512, 256, 28, 28, 3, 3]
+  operand_precision:
+    W: 16
+    I: 16
+    O: 16
+    O_final: 16
+  operand_source:
+    I: 9
+    W: 10
+
+- id: 11 # Conv1 Stride 1
+  name: layer_11
+  operator_type: Conv
+  equation: O[b][k][oy][ox]+=W[k][c][fy][fx]*I[b][c][iy][ix]
+  dimension_relations: [ox=1*ix+1*fx, oy=1*iy+1*fy]
+  loop_dims: [B, K, C, IY, IX, FY, FX]
+  loop_sizes: [1, 512, 256, 28, 28, 3, 3]
+  operand_precision:
+    W: 16
+    I: 16
+    O: 16
+    O_final: 16
+  operand_source:
+    I: 10
+    W: 11
+
+- id: 12 # Conv1 Stride 1
+  name: layer_12
+  operator_type: Conv
+  equation: O[b][k][oy][ox]+=W[k][c][fy][fx]*I[b][c][iy][ix]
+  dimension_relations: [ox=1*ix+1*fx, oy=1*iy+1*fy]
+  loop_dims: [B, K, C, IY, IX, FY, FX]
+  loop_sizes: [1, 512, 512, 28, 28, 3, 3]
+  operand_precision:
+    W: 16
+    I: 16
+    O: 16
+    O_final: 16
+  operand_source:
+    I: 11
+    W: 12
+
+# - id: 13 # Pool1 #Stride 2
+#   name: pooling_layer_4
+#   operator_type: Pooling
+#   equation: O[b][g][oy][ox]+=W[fy][fx]*I[b][g][iy][ix]
+#   dimension_relations: [ox=2*ix+1*fx, oy=2*iy+1*fy]
+#   loop_dims: [B, G, IY, IX, FY, FX]
+#   loop_sizes: [1, 512, 28, 28, 2, 2]
+#   operand_precision:
+#     W: 16
+#     I: 16
+#     O: 16
+#     O_final: 16
+#   operand_source:
+#     I: 12
+#     W: 13
+
+- id: 13 # Pool1 #Stride 2
+  name: pooling_layer_4
+  operator_type: Pooling
+  equation: O[b][g][oy][ox]+=W[fy][fx]*I[b][g][iy][ix]
+  dimension_relations: [ix=2*ox+1*fx, iy=2*oy+1*fy]
+  loop_dims: [B, G, OY, OX, FY, FX]
+  loop_sizes: [1, 512, 14, 14, 2, 2]
+  operand_precision:
+    W: 16
+    I: 16
+    O: 16
+    O_final: 16
+  operand_source:
+    I: 12
+    W: 13
+
+- id: 14 # Conv1 Stride 1
+  name: layer_14
+  operator_type: Conv
+  equation: O[b][k][oy][ox]+=W[k][c][fy][fx]*I[b][c][iy][ix]
+  dimension_relations: [ox=1*ix+1*fx, oy=1*iy+1*fy]
+  loop_dims: [B, K, C, IY, IX, FY, FX]
+  loop_sizes: [1, 512, 512, 14, 14, 3, 3]
+  operand_precision:
+    W: 16
+    I: 16
+    O: 16
+    O_final: 16
+  operand_source:
+    I: 13
+    W: 14
+
+- id: 15 # Conv1 Stride 1
+  name: layer_15
+  operator_type: Conv
+  equation: O[b][k][oy][ox]+=W[k][c][fy][fx]*I[b][c][iy][ix]
+  dimension_relations: [ox=1*ix+1*fx, oy=1*iy+1*fy]
+  loop_dims: [B, K, C, IY, IX, FY, FX]
+  loop_sizes: [1, 512, 512, 14, 14, 3, 3]
+  operand_precision:
+    W: 16
+    I: 16
+    O: 16
+    O_final: 16
+  operand_source:
+    I: 14
+    W: 15
+
+- id: 16 # Conv1 Stride 1
+  name: layer_16
+  operator_type: Conv
+  equation: O[b][k][oy][ox]+=W[k][c][fy][fx]*I[b][c][iy][ix]
+  dimension_relations: [ox=1*ix+1*fx, oy=1*iy+1*fy]
+  loop_dims: [B, K, C, IY, IX, FY, FX]
+  loop_sizes: [1, 512, 512, 14, 14, 3, 3]
+  operand_precision:
+    W: 16
+    I: 16
+    O: 16
+    O_final: 16
+  operand_source:
+    I: 15
+    W: 16
+
+# - id: 17 # Pool1 #Stride 2
+#   name: pooling_layer_5
+#   operator_type: Pooling
+#   equation: O[b][g][oy][ox]+=W[fy][fx]*I[b][g][iy][ix]
+#   dimension_relations: [ox=2*ix+1*fx, oy=2*iy+1*fy]
+#   loop_dims: [B, G, IY, IX, FY, FX]
+#   loop_sizes: [1, 512, 14, 14, 2, 2]
+#   operand_precision:
+#     W: 16
+#     I: 16
+#     O: 16
+#     O_final: 16
+#   operand_source:
+#     I: 16
+#     W: 17
+
+- id: 17 # Pool1 #Stride 2
+  name: pooling_layer_5
+  operator_type: Pooling
+  equation: O[b][g][oy][ox]+=W[fy][fx]*I[b][g][iy][ix]
+  dimension_relations: [ix=2*ox+1*fx, iy=2*oy+1*fy]
+  loop_dims: [B, G, OY, OX, FY, FX]
+  loop_sizes: [1, 512, 7, 7, 2, 2]
+  operand_precision:
+    W: 16
+    I: 16
+    O: 16
+    O_final: 16
+  operand_source:
+    I: 16
+    W: 17
+
+
+- id: 18 #Flatenning
+  name: layer_18
+  operator_type: Conv
+  equation: O[b][k][oy][ox]+=W[k][c][fy][fx]*I[b][c][iy][ix]
+  dimension_relations: [ox=1*ix+1*fx, oy=1*iy+1*fy]
+  loop_dims: [B, K, C, IY, IX, FY, FX]
+  loop_sizes: [1, 4096, 512, 7, 7, 7, 7]
+  operand_precision:
+    W: 16
+    I: 16
+    O: 16
+    O_final: 16
+  operand_source:
+    I: 17
+    W: 18
+  
+- id: 19 #FC
+  name: layer_19
+  operator_type: Conv
+  equation: O[b][k][oy][ox]+=W[k][c][fy][fx]*I[b][c][iy][ix]
+  dimension_relations: [ox=1*ix+1*fx, oy=1*iy+1*fy]
+  loop_dims: [B, K, C, IY, IX, FY, FX]
+  loop_sizes: [1, 4096, 4096, 1, 1, 1, 1]
+  operand_precision:
+    W: 16
+    I: 16
+    O: 16
+    O_final: 16
+  operand_source:
+    I: 18
+    W: 19
+
+- id: 20 #FC
+  name: layer_20
+  operator_type: Conv
+  equation: O[b][k][oy][ox]+=W[k][c][fy][fx]*I[b][c][iy][ix]
+  dimension_relations: [ox=1*ix+1*fx, oy=1*iy+1*fy]
+  loop_dims: [B, K, C, IY, IX, FY, FX]
+  loop_sizes: [1,1000,4096, 1, 1, 1, 1]
+  operand_precision:
+    W: 16
+    I: 16
+    O: 16
+    O_final: 16
+  operand_source:
+    I: 19
+    W: 20
+
+```
+
+#### Mapping constraints
+
+As the intrest is to perform the exploraiton for the event driven case then spatial unrolling across FX, FY and K
+
+Now, the first question is to idently the computationally demanding layer in the entire VGG net
+
 

@@ -35,3 +35,13 @@
 
 
 Google docs link: https://docs.google.com/document/d/1GZSZcYT4pc3aG_H9n8IAWjsGg1PkqwfFq4jXFmlzCLA/edit?usp=sharing
+
+Guidelines regarding the presernation:
+
+https://www.tudelft.nl/en/student/eemcs-student-portal/education/graduation-msc/degree-audit/thesis-assessment
+
+Guidelines regarding the Thesis report
+
+https://www.tudelft.nl/studenten/ewi-studentenportal/onderwijs/afstuderen-msc/degree-audit/requirements-timing
+
+
